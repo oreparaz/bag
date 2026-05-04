@@ -15,7 +15,12 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/bag ./
 RUN CGO_ENABLED=0 go test -c -o /out/conformance.test ./test/conformance/
 
 FROM alpine:3.20
-RUN apk add --no-cache curl wget ca-certificates
+# Alpine's default /bin/cat / /bin/base64 are BusyBox applets which only
+# implement a small subset of GNU's flag surface (no -s, no -E, no -T,
+# different decode semantics, etc.). The bag tools target GNU coreutils
+# semantics, so we install the GNU package to make the conformance
+# comparison apples-to-apples.
+RUN apk add --no-cache curl wget coreutils ca-certificates
 COPY --from=builder /out/bag /usr/local/bin/bag
 COPY --from=builder /out/conformance.test /usr/local/bin/conformance.test
 ENV BAG_BIN=/usr/local/bin/bag
