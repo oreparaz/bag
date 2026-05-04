@@ -1,0 +1,9 @@
+/bag
+/dist/
+/build/
+*.test
+*.out
+.DS_Store
+.idea/
+.vscode/
+coverage.txt
