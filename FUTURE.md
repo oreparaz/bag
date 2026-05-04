@@ -7,7 +7,7 @@ roughly grouped, not prioritized. Open an issue to bump something up.
 
 - `grep` (PCRE-free; RE2)
 - `sed` (subset)
-- `xxd` / `hexdump`
+- `hexdump` (BSD-style; xxd already shipped)
 - `tr`
 - `cut`, `sort`, `uniq`, `wc`
 - `find`

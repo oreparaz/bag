@@ -20,7 +20,9 @@ import (
 	"github.com/oreparaz/bag/internal/head"
 	"github.com/oreparaz/bag/internal/tail"
 	"github.com/oreparaz/bag/internal/tee"
+	"github.com/oreparaz/bag/internal/wc"
 	"github.com/oreparaz/bag/internal/wget"
+	"github.com/oreparaz/bag/internal/xxd"
 )
 
 // Tool is one entry in the multicall dispatch table.
@@ -38,7 +40,9 @@ func tools() []Tool {
 		{Name: "head", Run: head.Main, Help: "first lines/bytes"},
 		{Name: "tail", Run: tail.Main, Help: "last lines/bytes"},
 		{Name: "tee", Run: tee.Main, Help: "stdin to stdout + files"},
+		{Name: "wc", Run: wc.Main, Help: "count lines/words/bytes"},
 		{Name: "wget", Run: wget.Main, Help: "download files"},
+		{Name: "xxd", Run: xxd.Main, Help: "hex dump / reverse"},
 	}
 }
 

@@ -119,6 +119,21 @@ func TestTeeConformance(t *testing.T) {
 	Run(t, TeeCases(), realBin, bagBin)
 }
 
+// TestWCConformance runs the wc corpus against system wc + bag.
+func TestWCConformance(t *testing.T) {
+	realBin := resolveTool(t, "BAG_REAL_WC", "wc")
+	bagBin := buildBagAs(t, "wc")
+	Run(t, WCCases(), realBin, bagBin)
+}
+
+// TestXXDConformance runs the xxd corpus against system xxd + bag.
+// Skipped automatically when xxd isn't installed on the system.
+func TestXXDConformance(t *testing.T) {
+	realBin := resolveTool(t, "BAG_REAL_XXD", "xxd")
+	bagBin := buildBagAs(t, "xxd")
+	Run(t, XXDCases(), realBin, bagBin)
+}
+
 func resolveTool(t *testing.T, env, fallback string) string {
 	t.Helper()
 	if v := os.Getenv(env); v != "" {

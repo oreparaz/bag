@@ -22,6 +22,8 @@ Why?
 | `tail`   | usable | -n / -c with `+N`; -f follow mode is *not* implemented     |
 | `base64` | usable | -d, -w, -i; GNU-compatible alphabet                        |
 | `tee`    | usable | -a, -i; standard pipeline use                              |
+| `wc`     | usable | -l, -w, -c, -m, -L; locale-aware -m matches GNU            |
+| `xxd`    | usable | hex dump + reverse, -p, -c, -g, -s, -l, -u                 |
 
 See [FUTURE.md](FUTURE.md) for the wish list.
 
