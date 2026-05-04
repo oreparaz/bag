@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+#
+# Conformance test against Debian's curl + wget.
+
+FROM golang:1.22 AS builder
+WORKDIR /src
+COPY go.mod ./
+COPY main.go main_test.go ./
+COPY internal/ internal/
+COPY test/ test/
+RUN CGO_ENABLED=0 go build -trimpath -o /out/bag ./
+RUN CGO_ENABLED=0 go test -c -o /out/conformance.test ./test/conformance/
+
+FROM debian:12-slim
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends curl wget ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+COPY --from=builder /out/bag /usr/local/bin/bag
+COPY --from=builder /out/conformance.test /usr/local/bin/conformance.test
+ENV BAG_BIN=/usr/local/bin/bag
+WORKDIR /work
+CMD ["/usr/local/bin/conformance.test", "-test.v"]

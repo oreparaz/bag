@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1
+#
+# Conformance test against Alpine's curl + wget.
+#
+# Note: Alpine's wget is BusyBox wget unless wget is installed explicitly,
+# which has a different option set. We install GNU wget for parity.
+
+FROM golang:1.22-alpine AS builder
+WORKDIR /src
+COPY go.mod ./
+COPY main.go main_test.go ./
+COPY internal/ internal/
+COPY test/ test/
+RUN CGO_ENABLED=0 go build -trimpath -o /out/bag ./
+RUN CGO_ENABLED=0 go test -c -o /out/conformance.test ./test/conformance/
+
+FROM alpine:3.20
+RUN apk add --no-cache curl wget ca-certificates
+COPY --from=builder /out/bag /usr/local/bin/bag
+COPY --from=builder /out/conformance.test /usr/local/bin/conformance.test
+ENV BAG_BIN=/usr/local/bin/bag
+WORKDIR /work
+CMD ["/usr/local/bin/conformance.test", "-test.v"]

@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1
+#
+# Conformance test against Fedora's curl + wget.
+
+FROM golang:1.22 AS builder
+WORKDIR /src
+COPY go.mod ./
+COPY main.go main_test.go ./
+COPY internal/ internal/
+COPY test/ test/
+RUN CGO_ENABLED=0 go build -trimpath -o /out/bag ./
+RUN CGO_ENABLED=0 go test -c -o /out/conformance.test ./test/conformance/
+
+FROM fedora:40
+RUN dnf install -y curl wget ca-certificates && dnf clean all
+COPY --from=builder /out/bag /usr/local/bin/bag
+COPY --from=builder /out/conformance.test /usr/local/bin/conformance.test
+ENV BAG_BIN=/usr/local/bin/bag
+WORKDIR /work
+CMD ["/usr/local/bin/conformance.test", "-test.v"]
