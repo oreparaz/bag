@@ -5,7 +5,6 @@ roughly grouped, not prioritized. Open an issue to bump something up.
 
 ## More tools to add to the bag
 
-- `tee`
 - `grep` (PCRE-free; RE2)
 - `sed` (subset)
 - `xxd` / `hexdump`

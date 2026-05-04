@@ -112,6 +112,13 @@ func TestBase64Conformance(t *testing.T) {
 	Run(t, Base64Cases(), realBin, bagBin)
 }
 
+// TestTeeConformance runs the tee corpus against system tee + bag.
+func TestTeeConformance(t *testing.T) {
+	realBin := resolveTool(t, "BAG_REAL_TEE", "tee")
+	bagBin := buildBagAs(t, "tee")
+	Run(t, TeeCases(), realBin, bagBin)
+}
+
 func resolveTool(t *testing.T, env, fallback string) string {
 	t.Helper()
 	if v := os.Getenv(env); v != "" {

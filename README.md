@@ -21,6 +21,7 @@ Why?
 | `head`   | usable | -n / -c with `-N` (all but last) and unit suffixes         |
 | `tail`   | usable | -n / -c with `+N`; -f follow mode is *not* implemented     |
 | `base64` | usable | -d, -w, -i; GNU-compatible alphabet                        |
+| `tee`    | usable | -a, -i; standard pipeline use                              |
 
 See [FUTURE.md](FUTURE.md) for the wish list.
 
