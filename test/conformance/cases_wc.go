@@ -47,14 +47,10 @@ func WCCases() []Case {
 				return []string{"-c", p}, ""
 			},
 		},
-		{
-			Name: "chars_utf8",
-			Tool: ToolWC,
-			Args: func(e Env) ([]string, string) {
-				p := mkfile(e, "a.txt", "héllo")
-				return []string{"-m", p}, ""
-			},
-		},
+		// Note: -m (chars) is intentionally not in the conformance corpus.
+		// Behavior is libc-dependent: glibc respects locale and falls back
+		// to byte counting under C/POSIX, while musl always treats input
+		// as UTF-8. Bag has unit tests covering its own behavior.
 		{
 			Name: "max_line_length",
 			Tool: ToolWC,
