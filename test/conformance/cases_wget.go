@@ -140,14 +140,18 @@ func WgetCases() []Case {
 			CompareStdout: ptr(false),
 		},
 		{
+			// Fedora ships wget2, which interprets --timeout differently from
+			// classic wget — under wget2 a 0.5s timeout may not abort a 3s
+			// transfer. We only assert bag's own behavior here.
 			Name: "timeout_short",
 			Tool: ToolWget,
 			Args: func(e Env) ([]string, string) {
 				return []string{"-q", "-O-", "--timeout=0.5", "-t", "1", "--waitretry=0",
 					fmt.Sprintf("%s/slow?ms=3000", e.HTTP)}, ""
 			},
-			ExpectExit:    ptr(4),
-			CompareStdout: ptr(false),
+			ExpectExitMatch: ptr(false),
+			ExpectExit:      ptr(4),
+			CompareStdout:   ptr(false),
 		},
 		{
 			Name: "input_file",
