@@ -207,7 +207,9 @@ func (a *app) doOnce(ctx context.Context, method, url string, body io.Reader, ct
 	}
 
 	if a.opts.WriteOut != "" {
-		writeWriteOut(a.stderr, a.opts.WriteOut, resp, n)
+		// curl writes -w output to stdout (regardless of -o / file output),
+		// not stderr. Tests of -w live alongside -o /dev/null.
+		writeWriteOut(a.stdout, a.opts.WriteOut, resp, n)
 	}
 	return exitOK, false
 }

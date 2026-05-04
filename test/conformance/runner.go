@@ -232,6 +232,18 @@ func compareJSON(a, b []byte, ignoreFields, ignoreHeaders []string) error {
 	return nil
 }
 
+// defaultIgnoredHeaders are protocol-level headers we always strip before
+// JSON comparison. Distros and tool versions vary on these — Fedora's
+// wget2 sends "Connection: keep-alive" while Ubuntu's classic wget
+// sends "Connection: Keep-Alive"; wget2 advertises compression even
+// without --compressed; etc. The conformance tests assert behavior, not
+// byte-exact wire protocol details.
+var defaultIgnoredHeaders = []string{
+	"Accept-Encoding",
+	"Connection",
+	"Te",
+}
+
 func scrub(v any, fields, headers []string) {
 	m, ok := v.(map[string]any)
 	if !ok {
@@ -241,6 +253,9 @@ func scrub(v any, fields, headers []string) {
 		delete(m, f)
 	}
 	if hh, ok := m["headers"].(map[string]any); ok {
+		for _, h := range defaultIgnoredHeaders {
+			delete(hh, h)
+		}
 		for _, h := range headers {
 			delete(hh, h)
 		}

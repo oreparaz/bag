@@ -8,10 +8,12 @@ import (
 	"compress/gzip"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -25,6 +27,11 @@ import (
 	"strings"
 	"time"
 )
+
+func shortHash(b []byte) string {
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:8])
+}
 
 // Servers wraps the HTTP and HTTPS servers used by tests.
 type Servers struct {
@@ -245,6 +252,41 @@ func buildMux() http.Handler {
 		w.Header().Set("Content-Length", strconv.Itoa(end-start+1))
 		w.WriteHeader(http.StatusPartialContent)
 		w.Write(full[start : end+1])
+	})
+
+	mux.HandleFunc("/multipart", func(w http.ResponseWriter, r *http.Request) {
+		// Returns a deterministic JSON representation of a multipart POST,
+		// independent of the random boundary the client picks.
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintln(w, err)
+			return
+		}
+		out := map[string]any{}
+		fields := map[string]string{}
+		for k, vs := range r.MultipartForm.Value {
+			fields[k] = strings.Join(vs, ",")
+		}
+		out["fields"] = fields
+		files := map[string]map[string]any{}
+		for k, fs := range r.MultipartForm.File {
+			for _, fh := range fs {
+				f, err := fh.Open()
+				if err != nil {
+					continue
+				}
+				body, _ := io.ReadAll(f)
+				f.Close()
+				files[k] = map[string]any{
+					"filename": fh.Filename,
+					"size":     fh.Size,
+					"sha":      shortHash(body),
+				}
+			}
+		}
+		out["files"] = files
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(out)
 	})
 
 	mux.HandleFunc("/links", func(w http.ResponseWriter, _ *http.Request) {

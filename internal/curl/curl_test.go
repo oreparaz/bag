@@ -383,11 +383,11 @@ func TestMaxTime(t *testing.T) {
 func TestWriteOut(t *testing.T) {
 	srv := mustStartServer(t)
 	r, w, _ := os.Pipe()
-	oldErr := os.Stderr
-	os.Stderr = w
+	oldOut := os.Stdout
+	os.Stdout = w
 	exit := Main([]string{"-s", "-o", os.DevNull, "-w", "%{http_code}\\n", srv.HTTP.URL + "/status/418"})
 	w.Close()
-	os.Stderr = oldErr
+	os.Stdout = oldOut
 	out, _ := io.ReadAll(r)
 	if exit != 0 {
 		t.Fatalf("exit=%d", exit)

@@ -265,6 +265,63 @@ func CurlCases() []Case {
 			CompareStdout: ptr(false),
 		},
 		{
+			Name: "multipart_form",
+			Tool: ToolCurl,
+			Args: func(e Env) ([]string, string) {
+				p := filepath.Join(e.TempDir, "doc.txt")
+				_ = os.WriteFile(p, []byte("hello multipart\n"), 0o644)
+				return []string{"-s", "-F", "name=alice", "-F", "file=@" + p, e.HTTP + "/multipart"}, ""
+			},
+			CompareJSON: true,
+		},
+		{
+			Name: "referer",
+			Tool: ToolCurl,
+			Args: func(e Env) ([]string, string) {
+				return []string{"-s", "-e", "https://prev.example/", e.HTTP + "/headers"}, ""
+			},
+			CompareJSON:       true,
+			JSONIgnoreFields:  []string{"host"},
+			JSONIgnoreHeaders: []string{"User-Agent"},
+		},
+		{
+			Name: "put_with_data",
+			Tool: ToolCurl,
+			Args: func(e Env) ([]string, string) {
+				return []string{"-s", "-X", "PUT", "-d", "payload=42", e.HTTP + "/echo"}, ""
+			},
+			CompareJSON:       true,
+			JSONIgnoreFields:  []string{"host"},
+			JSONIgnoreHeaders: []string{"User-Agent"},
+		},
+		{
+			Name: "header_delete",
+			Tool: ToolCurl,
+			Args: func(e Env) ([]string, string) {
+				return []string{"-s", "-H", "Accept:", e.HTTP + "/headers"}, ""
+			},
+			CompareJSON:       true,
+			JSONIgnoreFields:  []string{"host"},
+			JSONIgnoreHeaders: []string{"User-Agent"},
+		},
+		{
+			Name: "host_override",
+			Tool: ToolCurl,
+			Args: func(e Env) ([]string, string) {
+				return []string{"-s", "-H", "Host: virtual.example", e.HTTP + "/headers"}, ""
+			},
+			CompareJSON:      true,
+			JSONIgnoreFields: []string{"host"}, // server reports the request Host
+			JSONIgnoreHeaders: []string{"User-Agent"},
+		},
+		{
+			Name: "writeout_status",
+			Tool: ToolCurl,
+			Args: func(e Env) ([]string, string) {
+				return []string{"-s", "-o", os.DevNull, "-w", "%{http_code}", e.HTTP + "/status/418"}, ""
+			},
+		},
+		{
 			Name: "unsupported_protocol",
 			Tool: ToolCurl,
 			Args: func(_ Env) ([]string, string) {

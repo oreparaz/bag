@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-          cache: true
+          # cache: false — no go.sum (stdlib-only project)
       - run: go vet ./...
       - run: go test -race -count=1 ./...
       - run: make lint-no-unsafe
