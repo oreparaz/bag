@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 )
 
@@ -128,5 +129,47 @@ func WgetCases() []Case {
 			},
 			CompareFile: "blob",
 		},
+		{
+			Name: "tries_one_on_unreachable",
+			Tool: ToolWget,
+			Args: func(_ Env) ([]string, string) {
+				// 127.0.0.1:1 connection-refused is reliable across distros.
+				return []string{"-q", "-O-", "-t", "1", "--waitretry=0", "http://127.0.0.1:1/"}, ""
+			},
+			ExpectExit:    ptr(4),
+			CompareStdout: ptr(false),
+		},
+		{
+			Name: "timeout_short",
+			Tool: ToolWget,
+			Args: func(e Env) ([]string, string) {
+				return []string{"-q", "-O-", "--timeout=0.5", "-t", "1", "--waitretry=0",
+					fmt.Sprintf("%s/slow?ms=3000", e.HTTP)}, ""
+			},
+			ExpectExit:    ptr(4),
+			CompareStdout: ptr(false),
+		},
+		{
+			Name: "input_file",
+			Tool: ToolWget,
+			Args: func(e Env) ([]string, string) {
+				p := filepath.Join(e.TempDir, "urls.txt")
+				_ = writeFile(p, fmt.Sprintf("%s/ok\n%s/empty\n", e.HTTP, e.HTTP))
+				return []string{"-q", "-i", p}, ""
+			},
+			CompareFile: "ok",
+		},
+		{
+			Name: "content_disposition_filename",
+			Tool: ToolWget,
+			Args: func(e Env) ([]string, string) {
+				return []string{"-q", "--content-disposition", e.HTTP + "/cd-filename"}, ""
+			},
+			CompareFile: "report.txt",
+		},
 	}
+}
+
+func writeFile(p, content string) error {
+	return os.WriteFile(p, []byte(content), 0o644)
 }

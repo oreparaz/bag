@@ -254,6 +254,12 @@ func buildMux() http.Handler {
 		w.Write(full[start : end+1])
 	})
 
+	mux.HandleFunc("/cd-filename", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", `attachment; filename="report.txt"`)
+		_, _ = w.Write([]byte("downloaded\n"))
+	})
+
 	mux.HandleFunc("/multipart", func(w http.ResponseWriter, r *http.Request) {
 		// Returns a deterministic JSON representation of a multipart POST,
 		// independent of the random boundary the client picks.

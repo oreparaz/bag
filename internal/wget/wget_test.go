@@ -294,6 +294,25 @@ func TestRecursiveShallow(t *testing.T) {
 	}
 }
 
+func TestHasParentSegment(t *testing.T) {
+	cases := map[string]bool{
+		"/foo":          false,
+		"/foo/..":       true,
+		"/foo/../bar":   true,
+		"/foo/.bar":     false,
+		"":              false,
+		"/..":           true,
+		"/foo/bar":      false,
+		"/.././x":       true,
+		"a/..":          true,
+	}
+	for in, want := range cases {
+		if got := hasParentSegment(in); got != want {
+			t.Errorf("hasParentSegment(%q) = %v want %v", in, got, want)
+		}
+	}
+}
+
 func TestExtractLinks(t *testing.T) {
 	html := []byte(`
 <html>

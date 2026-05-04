@@ -115,6 +115,13 @@ func (a *app) fetchAndCapture(u *url.URL) ([]byte, int) {
 	if rel == "" || strings.HasSuffix(rel, "/") {
 		rel = strings.TrimSuffix(rel, "/") + "/index.html"
 	}
+	// Defense in depth: reject server-controlled paths that contain ".."
+	// segments. filepath.Join would resolve them and could land us outside
+	// the intended output tree (e.g. a redirect to /../../../etc/passwd).
+	if hasParentSegment(rel) {
+		fmt.Fprintf(a.logW, "wget: refusing to write outside output dir: %q\n", rel)
+		return body, exitFileIO
+	}
 	out := filepath.Join(a.applyDirPrefix(""), u.Host, rel)
 	if a.opts.NoDirectories {
 		out = a.applyDirPrefix(filepath.Base(rel))
@@ -135,6 +142,18 @@ func (a *app) fetchAndCapture(u *url.URL) ([]byte, int) {
 		return body, exitFileIO
 	}
 	return body, exitOK
+}
+
+// hasParentSegment reports whether p contains a ".." segment (after splitting
+// by '/'). Used to refuse server-controlled paths that could escape the
+// output directory.
+func hasParentSegment(p string) bool {
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func canonical(u *url.URL) string {
