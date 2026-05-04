@@ -13,10 +13,14 @@ Why?
 
 ## Tools shipped today
 
-| Tool   | Status   | Notes                                  |
-|--------|----------|----------------------------------------|
-| `curl` | usable   | HTTP/HTTPS only                        |
-| `wget` | usable   | HTTP/HTTPS only                        |
+| Tool     | Status | Notes                                                      |
+|----------|--------|------------------------------------------------------------|
+| `curl`   | usable | HTTP/HTTPS only                                            |
+| `wget`   | usable | HTTP/HTTPS only; recursive `-r` is shallow                 |
+| `cat`    | usable | -n, -b, -s, -E, -T, -A, -v; binary-faithful by default     |
+| `head`   | usable | -n / -c with `-N` (all but last) and unit suffixes         |
+| `tail`   | usable | -n / -c with `+N`; -f follow mode is *not* implemented     |
+| `base64` | usable | -d, -w, -i; GNU-compatible alphabet                        |
 
 See [FUTURE.md](FUTURE.md) for the wish list.
 

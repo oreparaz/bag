@@ -84,6 +84,34 @@ func TestWgetConformance(t *testing.T) {
 	Run(t, WgetCases(), realBin, bagBin)
 }
 
+// TestCatConformance runs the cat corpus against system cat + bag.
+func TestCatConformance(t *testing.T) {
+	realBin := resolveTool(t, "BAG_REAL_CAT", "cat")
+	bagBin := buildBagAs(t, "cat")
+	Run(t, CatCases(), realBin, bagBin)
+}
+
+// TestHeadConformance runs the head corpus against system head + bag.
+func TestHeadConformance(t *testing.T) {
+	realBin := resolveTool(t, "BAG_REAL_HEAD", "head")
+	bagBin := buildBagAs(t, "head")
+	Run(t, HeadCases(), realBin, bagBin)
+}
+
+// TestTailConformance runs the tail corpus against system tail + bag.
+func TestTailConformance(t *testing.T) {
+	realBin := resolveTool(t, "BAG_REAL_TAIL", "tail")
+	bagBin := buildBagAs(t, "tail")
+	Run(t, TailCases(), realBin, bagBin)
+}
+
+// TestBase64Conformance runs the base64 corpus against system base64 + bag.
+func TestBase64Conformance(t *testing.T) {
+	realBin := resolveTool(t, "BAG_REAL_BASE64", "base64")
+	bagBin := buildBagAs(t, "base64")
+	Run(t, Base64Cases(), realBin, bagBin)
+}
+
 func resolveTool(t *testing.T, env, fallback string) string {
 	t.Helper()
 	if v := os.Getenv(env); v != "" {

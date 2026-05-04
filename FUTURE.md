@@ -5,11 +5,10 @@ roughly grouped, not prioritized. Open an issue to bump something up.
 
 ## More tools to add to the bag
 
-- `cat`, `head`, `tail`, `tee`
+- `tee`
 - `grep` (PCRE-free; RE2)
 - `sed` (subset)
 - `xxd` / `hexdump`
-- `base64`
 - `tr`
 - `cut`, `sort`, `uniq`, `wc`
 - `find`
@@ -56,6 +55,18 @@ roughly grouped, not prioritized. Open an issue to bump something up.
 - `--limit-rate`
 - Authentication beyond Basic
 - `--warc-*` archiving
+
+## tail features intentionally deferred
+
+- `-f` / `-F` follow modes (and `--retry`, `--max-unchanged-stats`,
+  `--pid`)
+- `--sleep-interval`, `--max-unchanged-stats` for follow mode
+
+## cat features intentionally deferred
+
+- POSIX `cat -u` already accepted as a no-op, since we line-flush at exit.
+- `-A` rendering of multibyte / locale-specific bytes — we render bytes,
+  not runes (matches GNU cat).
 
 ## Cross-cutting
 

@@ -14,7 +14,11 @@ import (
 	"sort"
 	"strings"
 
+	base64cmd "github.com/oreparaz/bag/internal/base64cmd"
+	"github.com/oreparaz/bag/internal/cat"
 	"github.com/oreparaz/bag/internal/curl"
+	"github.com/oreparaz/bag/internal/head"
+	"github.com/oreparaz/bag/internal/tail"
 	"github.com/oreparaz/bag/internal/wget"
 )
 
@@ -27,7 +31,11 @@ type Tool struct {
 
 func tools() []Tool {
 	return []Tool{
+		{Name: "base64", Run: base64cmd.Main, Help: "encode/decode base64"},
+		{Name: "cat", Run: cat.Main, Help: "concatenate files"},
 		{Name: "curl", Run: curl.Main, Help: "transfer URLs"},
+		{Name: "head", Run: head.Main, Help: "first lines/bytes"},
+		{Name: "tail", Run: tail.Main, Help: "last lines/bytes"},
 		{Name: "wget", Run: wget.Main, Help: "download files"},
 	}
 }

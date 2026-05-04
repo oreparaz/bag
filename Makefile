@@ -18,7 +18,7 @@ build:
 
 .PHONY: install-symlinks
 install-symlinks: build
-	@for tool in curl wget; do \
+	@for tool in base64 cat curl head tail wget; do \
 		ln -sf $(BINARY) $$tool; \
 		echo "linked $$tool -> $(BINARY)"; \
 	done
@@ -53,5 +53,5 @@ docker-test:
 
 .PHONY: clean
 clean:
-	rm -f $(BINARY) curl wget
+	rm -f $(BINARY) base64 cat curl head tail wget
 	rm -rf dist/

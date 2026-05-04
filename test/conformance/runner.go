@@ -62,6 +62,9 @@ type Case struct {
 	// tool and bag's. SkipReason can be returned to skip the case.
 	Args func(env Env) (args []string, skip string)
 
+	// Stdin, if non-nil, is fed to both processes' stdin.
+	Stdin []byte
+
 	// ExpectExitMatch: both implementations must exit with the same code.
 	// Default: true.
 	ExpectExitMatch *bool
@@ -128,8 +131,8 @@ func runOne(t *testing.T, c Case, realBin, bagBin string, srv *testserver.Server
 		t.Skipf("skipped: %s%s", skipA, skipB)
 	}
 
-	resA := runCmd(t, realBin, argsA, dirA)
-	resB := runCmd(t, bagBin, argsB, dirB)
+	resA := runCmd(t, realBin, argsA, dirA, c.Stdin)
+	resB := runCmd(t, bagBin, argsB, dirB, c.Stdin)
 
 	expectExitMatch := true
 	if c.ExpectExitMatch != nil {
@@ -187,7 +190,7 @@ type cmdResult struct {
 	exit   int
 }
 
-func runCmd(t *testing.T, bin string, args []string, cwd string) cmdResult {
+func runCmd(t *testing.T, bin string, args []string, cwd string, stdin []byte) cmdResult {
 	t.Helper()
 	ctx, cancel := newTimeout()
 	defer cancel()
@@ -197,6 +200,9 @@ func runCmd(t *testing.T, bin string, args []string, cwd string) cmdResult {
 	var so, se bytes.Buffer
 	cmd.Stdout = &so
 	cmd.Stderr = &se
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	// Provide an isolated env: we rely on PATH for bash/dns but otherwise
 	// nothing leaks in (no proxies, no curlrc).
 	cmd.Env = []string{
