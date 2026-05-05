@@ -26,6 +26,7 @@ import (
 	"github.com/oreparaz/bag/internal/wc"
 	"github.com/oreparaz/bag/internal/wget"
 	"github.com/oreparaz/bag/internal/xxd"
+	"github.com/oreparaz/bag/internal/zipcmd"
 )
 
 // Tool is one entry in the multicall dispatch table.
@@ -47,6 +48,8 @@ func tools() []Tool {
 		{Name: "wc", Run: wc.Main, Help: "count lines/words/bytes"},
 		{Name: "wget", Run: wget.Main, Help: "download files"},
 		{Name: "xxd", Run: xxd.Main, Help: "hex dump / reverse"},
+		{Name: "zip", Run: func(a []string) int { return zipcmd.MainAs("zip", a) }, Help: "create zip archive"},
+		{Name: "unzip", Run: func(a []string) int { return zipcmd.MainAs("unzip", a) }, Help: "extract zip archive"},
 	}
 	all = append(all, compressorTools()...)
 	return all

@@ -20,7 +20,7 @@ FROM alpine:3.20
 # different decode semantics, etc.). The bag tools target GNU coreutils
 # semantics, so we install the GNU package to make the conformance
 # comparison apples-to-apples.
-RUN apk add --no-cache curl wget coreutils xxd gzip bzip2 xz zstd ca-certificates
+RUN apk add --no-cache curl wget coreutils xxd gzip bzip2 xz zstd zip unzip ca-certificates
 COPY --from=builder /out/bag /usr/local/bin/bag
 COPY --from=builder /out/conformance.test /usr/local/bin/conformance.test
 ENV BAG_BIN=/usr/local/bin/bag
