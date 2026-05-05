@@ -8,7 +8,19 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
+
+func parseSeconds(s string) (time.Duration, error) {
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, err
+	}
+	if f < 0 {
+		return 0, errors.New("negative duration")
+	}
+	return time.Duration(f * float64(time.Second)), nil
+}
 
 type options struct {
 	files []string
@@ -20,6 +32,10 @@ type options struct {
 
 	quiet   bool
 	verbose bool
+
+	follow      bool          // -f
+	followRetry bool          // -F (implies follow)
+	pollEvery   time.Duration // default 200ms
 
 	printHelp    bool
 	printVersion bool
@@ -61,7 +77,6 @@ func run(args []string) int {
 	}
 
 	out := bufio.NewWriter(os.Stdout)
-	defer out.Flush()
 
 	exit := 0
 	for i, f := range files {
@@ -75,6 +90,13 @@ func run(args []string) int {
 			fmt.Fprintf(os.Stderr, "tail: %s: %v\n", displayName(f), err)
 			exit = 1
 		}
+	}
+	out.Flush()
+
+	if opts.follow || opts.followRetry {
+		// Follow uses an unbuffered writer so partial-line writes appear
+		// promptly.
+		exit = followAll(os.Stdout, files, opts, printHeaders)
 	}
 	return exit
 }
@@ -217,7 +239,7 @@ func displayName(name string) string {
 }
 
 func parseArgs(args []string) (*options, error) {
-	o := &options{}
+	o := &options{pollEvery: 200 * time.Millisecond}
 	i := 0
 	for i < len(args) {
 		a := args[i]
@@ -266,6 +288,33 @@ func parseArgs(args []string) (*options, error) {
 		for j < len(a) {
 			c := a[j]
 			switch c {
+			case 'f':
+				o.follow = true
+				j++
+				continue
+			case 'F':
+				o.followRetry = true
+				o.follow = true
+				j++
+				continue
+			case 's':
+				arg := ""
+				if j+1 < len(a) {
+					arg = a[j+1:]
+				} else {
+					if i+1 >= len(args) {
+						return nil, errors.New("-s requires an argument")
+					}
+					i++
+					arg = args[i]
+				}
+				d, err := parseSeconds(arg)
+				if err != nil {
+					return nil, fmt.Errorf("-s: %v", err)
+				}
+				o.pollEvery = d
+				j = len(a)
+				continue
 			case 'n', 'c':
 				arg := ""
 				if j+1 < len(a) {
@@ -292,8 +341,6 @@ func parseArgs(args []string) (*options, error) {
 			case 'v':
 				o.verbose = true
 				j++
-			case 'f':
-				return nil, errors.New("-f follow mode not yet supported")
 			default:
 				return nil, fmt.Errorf("unknown option -%c", c)
 			}
@@ -336,7 +383,20 @@ func applyLong(o *options, name string, next func() (string, error)) error {
 	case "verbose":
 		o.verbose = true
 	case "follow":
-		return errors.New("--follow not yet supported")
+		o.follow = true
+	case "retry":
+		o.followRetry = true
+		o.follow = true
+	case "sleep-interval":
+		v, err := next()
+		if err != nil {
+			return err
+		}
+		d, err := parseSeconds(v)
+		if err != nil {
+			return fmt.Errorf("--sleep-interval: %v", err)
+		}
+		o.pollEvery = d
 	case "help":
 		o.printHelp = true
 	case "version":

@@ -132,13 +132,6 @@ func TestParseTailCount(t *testing.T) {
 	}
 }
 
-func TestRejectFollow(t *testing.T) {
-	exit, _ := runTail(t, []byte("x\n"), "-f")
-	if exit == 0 {
-		t.Errorf("expected non-zero exit when -f passed")
-	}
-}
-
 func TestNonexistent(t *testing.T) {
 	exit, _ := runTail(t, nil, "/no/such/path")
 	if exit == 0 {
