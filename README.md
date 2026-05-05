@@ -13,17 +13,31 @@ Why?
 
 ## Tools shipped today
 
-| Tool     | Status | Notes                                                      |
-|----------|--------|------------------------------------------------------------|
-| `curl`   | usable | HTTP/HTTPS only                                            |
-| `wget`   | usable | HTTP/HTTPS only; recursive `-r` is shallow                 |
-| `cat`    | usable | -n, -b, -s, -E, -T, -A, -v; binary-faithful by default     |
-| `head`   | usable | -n / -c with `-N` (all but last) and unit suffixes         |
-| `tail`   | usable | -n / -c with `+N`; -f follow mode is *not* implemented     |
-| `base64` | usable | -d, -w, -i; GNU-compatible alphabet                        |
-| `tee`    | usable | -a, -i; standard pipeline use                              |
-| `wc`     | usable | -l, -w, -c, -m, -L; locale-aware -m matches GNU            |
-| `xxd`    | usable | hex dump + reverse, -p, -c, -g, -s, -l, -u                 |
+| Tool       | Status | Notes                                                      |
+|------------|--------|------------------------------------------------------------|
+| `curl`     | usable | HTTP/HTTPS only                                            |
+| `wget`     | usable | HTTP/HTTPS only; recursive `-r` is shallow                 |
+| `cat`      | usable | -n, -b, -s, -E, -T, -A, -v; binary-faithful by default     |
+| `head`     | usable | -n / -c with `-N` (all but last) and unit suffixes         |
+| `tail`     | usable | -n / -c with `+N`; -f / -F follow at 200 ms (configurable) |
+| `base64`   | usable | -d, -w, -i; GNU-compatible alphabet                        |
+| `tee`      | usable | -a, -i; standard pipeline use                              |
+| `wc`       | usable | -l, -w, -c, -m, -L; locale-aware -m matches GNU            |
+| `xxd`      | usable | hex dump + reverse, -p, -c, -g, -s, -l, -u                 |
+| `gzip`     | usable | + `gunzip` and `zcat` aliases                              |
+| `bzip2`    | usable | + `bunzip2` and `bzcat` aliases                            |
+| `xz`       | usable | + `unxz` and `xzcat` aliases                               |
+| `zstd`     | usable | + `unzstd` and `zstdcat` aliases                           |
+| `tar`      | usable | -c/-x/-t with -z/-j/-J/--zstd, -C, --exclude, --strip-components |
+| `zip`      | usable | -r recurse, -j junk paths, -q                              |
+| `unzip`    | usable | -l list, -p stdout, -d DIR, -j, -o, -n                     |
+| `grep`     | usable | RE2 backend; -i -v -c -l -L -n -r -E -F -w -A/-B/-C        |
+| `sed`      | subset | s/// with g/i/p/Nth, d, p, q, addresses, -i in-place       |
+| `cut`      | usable | -f/-c/-b LIST with -d, --output-delimiter, --complement    |
+| `sort`     | usable | -n -r -u -f -b -k key -t sep -o; byte locale (C)           |
+| `uniq`     | usable | -c -d -u -i -f -s -w                                       |
+| `find`     | usable | -name/-iname/-path/-type/-size/-mtime/-prune/-exec/-delete |
+| `hexdump`  | usable | -C / -b / -c / -d / -o / -x; -n -s -v; squeeze with `*`    |
 
 See [FUTURE.md](FUTURE.md) for the wish list.
 

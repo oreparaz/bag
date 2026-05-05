@@ -32,6 +32,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/oreparaz/bag/test/testserver"
@@ -85,6 +86,10 @@ type Case struct {
 
 	// CompareFile compares this file under TempDir. Empty means none.
 	CompareFile string
+
+	// SortStdoutLines sorts both stdouts line-by-line before comparing.
+	// Used by tools like find where directory iteration order varies.
+	SortStdoutLines bool
 
 	// Stable: if false, real curl/wget output may be inherently
 	// non-deterministic for this case (e.g. progress on stderr); we
@@ -158,11 +163,17 @@ func runOne(t *testing.T, c Case, realBin, bagBin string, srv *testserver.Server
 		cmp = false
 	}
 	if cmp {
-		if !bytes.Equal(resA.stdout, resB.stdout) {
+		a := resA.stdout
+		b := resB.stdout
+		if c.SortStdoutLines {
+			a = sortLines(a)
+			b = sortLines(b)
+		}
+		if !bytes.Equal(a, b) {
 			t.Errorf("stdout mismatch:\nreal len=%d sha=%s\nbag  len=%d sha=%s\nreal stdout (first 4k):\n%s\n---\nbag stdout (first 4k):\n%s",
-				len(resA.stdout), sumHex(resA.stdout),
-				len(resB.stdout), sumHex(resB.stdout),
-				truncate(resA.stdout, 4000), truncate(resB.stdout, 4000))
+				len(a), sumHex(a),
+				len(b), sumHex(b),
+				truncate(a, 4000), truncate(b, 4000))
 		}
 	}
 	if c.CompareJSON {
@@ -288,6 +299,26 @@ func truncate(b []byte, n int) string {
 		return string(b)
 	}
 	return string(b[:n]) + fmt.Sprintf("\n... (%d more bytes)", len(b)-n)
+}
+
+// sortLines splits b on newline, sorts the lines, and rejoins. A trailing
+// newline (if any) is preserved.
+func sortLines(b []byte) []byte {
+	trail := len(b) > 0 && b[len(b)-1] == '\n'
+	s := string(b)
+	if trail {
+		s = s[:len(s)-1]
+	}
+	if s == "" {
+		return b
+	}
+	parts := strings.Split(s, "\n")
+	sort.Strings(parts)
+	out := strings.Join(parts, "\n")
+	if trail {
+		out += "\n"
+	}
+	return []byte(out)
 }
 
 // listFiles returns relative paths of files under root, sorted.

@@ -176,6 +176,15 @@ func TestHexdumpConformance(t *testing.T) {
 	Run(t, HexdumpCases(), realBin, bagBin)
 }
 
+// TestFindConformance runs the find corpus against system find + bag.
+// Outputs are sorted line-by-line because find's directory iteration
+// order isn't standardized.
+func TestFindConformance(t *testing.T) {
+	realBin := resolveTool(t, "BAG_REAL_FIND", "find")
+	bagBin := buildBagAs(t, "find")
+	Run(t, FindCases(), realBin, bagBin)
+}
+
 func resolveTool(t *testing.T, env, fallback string) string {
 	t.Helper()
 	if v := os.Getenv(env); v != "" {

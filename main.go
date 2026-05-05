@@ -20,6 +20,7 @@ import (
 	"github.com/oreparaz/bag/internal/compress"
 	"github.com/oreparaz/bag/internal/curl"
 	"github.com/oreparaz/bag/internal/cut"
+	"github.com/oreparaz/bag/internal/find"
 	"github.com/oreparaz/bag/internal/grep"
 	"github.com/oreparaz/bag/internal/head"
 	"github.com/oreparaz/bag/internal/hexdump"
@@ -48,6 +49,7 @@ func tools() []Tool {
 		{Name: "cat", Run: cat.Main, Help: "concatenate files"},
 		{Name: "curl", Run: curl.Main, Help: "transfer URLs"},
 		{Name: "cut", Run: cut.Main, Help: "select fields/bytes"},
+		{Name: "find", Run: find.Main, Help: "walk and filter files"},
 		{Name: "grep", Run: grep.Main, Help: "search lines (RE2)"},
 		{Name: "head", Run: head.Main, Help: "first lines/bytes"},
 		{Name: "hexdump", Run: hexdump.Main, Help: "BSD hex dump"},

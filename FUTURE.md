@@ -5,23 +5,53 @@ roughly grouped, not prioritized. Open an issue to bump something up.
 
 ## More tools to add to the bag
 
-- `grep` (PCRE-free; RE2)
-- `sed` (subset)
-- `hexdump` (BSD-style; xxd already shipped)
 - `tr`
-- `cut`, `sort`, `uniq`, `wc`
-- `find`
 - `nc` / `netcat` (HTTP/TCP only)
 - `dig` (basic A/AAAA/MX/TXT)
 - `ssh-keygen` subset (Ed25519 only)
 - `openssl` subset (`s_client`, `x509 -text`, `dgst`)
-- `tar` (read-only first?), `gzip`, `xz`, `zstd`
 - `jq` subset
 - `ping` (raw socket — needs cap_net_raw)
 - `traceroute` (UDP only)
 - `whois`
 - `time` (the timing one, not the clock)
 - `env`, `which`, `printenv`
+- `awk` subset
+
+## sed features intentionally deferred
+
+- `a` / `i` / `c` (append, insert, change)
+- Hold space commands: `h H g G x`
+- `y` transliteration
+- `b` / `t` branches with labels
+- `{...}` grouping
+- `r` / `w` / `R` / `W` file I/O
+- POSIX BRE pickiness (we're RE2-flavored throughout)
+
+## find features intentionally deferred
+
+- `-perm` / `-user` / `-group` (numeric and named, with mode masks)
+- `-regex` / `-iregex`
+- `-printf` with format strings
+- `-fprintf` / `-fprint` / `-fprint0`
+- `-execdir` / `-okdir` / `-ok` (interactive prompt)
+- `-cnewer` / `-anewer` / `-newerXY`
+- `-fstype` / `-xdev`
+
+## tar features intentionally deferred
+
+- `-T LIST` files-from
+- `--owner` / `--group` overrides
+- Sparse file support
+- ACLs / xattrs / SELinux contexts
+- PAX-extended headers when *creating* (we accept them on read)
+
+## zip features intentionally deferred
+
+- ZipCrypto / AES encryption
+- `-r0` store-only with `-r`
+- `-X` strip extra fields
+- Self-extracting archives
 
 ## curl features intentionally deferred
 
