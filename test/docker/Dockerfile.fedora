@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/bag ./
 RUN CGO_ENABLED=0 go test -c -o /out/conformance.test ./test/conformance/
 
 FROM fedora:40
-RUN dnf install -y curl wget vim-common ca-certificates && dnf clean all
+RUN dnf install -y curl wget vim-common gzip bzip2 xz zstd ca-certificates && dnf clean all
 COPY --from=builder /out/bag /usr/local/bin/bag
 COPY --from=builder /out/conformance.test /usr/local/bin/conformance.test
 ENV BAG_BIN=/usr/local/bin/bag

@@ -13,7 +13,7 @@ RUN CGO_ENABLED=0 go test -c -o /out/conformance.test ./test/conformance/
 
 FROM debian:12-slim
 RUN apt-get update -qq && \
-    apt-get install -y --no-install-recommends curl wget xxd ca-certificates && \
+    apt-get install -y --no-install-recommends curl wget xxd gzip bzip2 xz-utils zstd ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 COPY --from=builder /out/bag /usr/local/bin/bag
 COPY --from=builder /out/conformance.test /usr/local/bin/conformance.test

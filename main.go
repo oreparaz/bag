@@ -16,6 +16,8 @@ import (
 
 	base64cmd "github.com/oreparaz/bag/internal/base64cmd"
 	"github.com/oreparaz/bag/internal/cat"
+	"github.com/oreparaz/bag/internal/cmpressor"
+	"github.com/oreparaz/bag/internal/compress"
 	"github.com/oreparaz/bag/internal/curl"
 	"github.com/oreparaz/bag/internal/head"
 	"github.com/oreparaz/bag/internal/tail"
@@ -33,7 +35,7 @@ type Tool struct {
 }
 
 func tools() []Tool {
-	return []Tool{
+	all := []Tool{
 		{Name: "base64", Run: base64cmd.Main, Help: "encode/decode base64"},
 		{Name: "cat", Run: cat.Main, Help: "concatenate files"},
 		{Name: "curl", Run: curl.Main, Help: "transfer URLs"},
@@ -44,6 +46,55 @@ func tools() []Tool {
 		{Name: "wget", Run: wget.Main, Help: "download files"},
 		{Name: "xxd", Run: xxd.Main, Help: "hex dump / reverse"},
 	}
+	all = append(all, compressorTools()...)
+	return all
+}
+
+// compressorTools registers gzip / bzip2 / xz / zstd plus their un* and *cat
+// aliases as separate Tool entries. Each entry's Run closure pins the
+// codec format and the alias-specific defaults (decompress mode for un*,
+// always-stdout for *cat).
+func compressorTools() []Tool {
+	type entry struct {
+		name           string
+		fmtIs          compress.Format
+		decompress     bool
+		alwaysStdout   bool
+		help           string
+	}
+	entries := []entry{
+		{"gzip", compress.FormatGzip, false, false, "compress files (gzip)"},
+		{"gunzip", compress.FormatGzip, true, false, "decompress gzip files"},
+		{"zcat", compress.FormatGzip, true, true, "decompress gzip to stdout"},
+
+		{"bzip2", compress.FormatBzip2, false, false, "compress files (bzip2)"},
+		{"bunzip2", compress.FormatBzip2, true, false, "decompress bzip2 files"},
+		{"bzcat", compress.FormatBzip2, true, true, "decompress bzip2 to stdout"},
+
+		{"xz", compress.FormatXZ, false, false, "compress files (xz)"},
+		{"unxz", compress.FormatXZ, true, false, "decompress xz files"},
+		{"xzcat", compress.FormatXZ, true, true, "decompress xz to stdout"},
+
+		{"zstd", compress.FormatZstd, false, false, "compress files (zstd)"},
+		{"unzstd", compress.FormatZstd, true, false, "decompress zstd files"},
+		{"zstdcat", compress.FormatZstd, true, true, "decompress zstd to stdout"},
+	}
+	out := make([]Tool, 0, len(entries))
+	for _, e := range entries {
+		e := e
+		t := cmpressor.Tool{
+			Name:              e.name,
+			Format:            e.fmtIs,
+			DefaultDecompress: e.decompress,
+			AlwaysStdout:      e.alwaysStdout,
+		}
+		out = append(out, Tool{
+			Name: e.name,
+			Help: e.help,
+			Run:  func(args []string) int { return cmpressor.Main(t, args) },
+		})
+	}
+	return out
 }
 
 func main() {
