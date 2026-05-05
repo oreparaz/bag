@@ -21,6 +21,7 @@ import (
 	"github.com/oreparaz/bag/internal/curl"
 	"github.com/oreparaz/bag/internal/head"
 	"github.com/oreparaz/bag/internal/tail"
+	"github.com/oreparaz/bag/internal/tarcmd"
 	"github.com/oreparaz/bag/internal/tee"
 	"github.com/oreparaz/bag/internal/wc"
 	"github.com/oreparaz/bag/internal/wget"
@@ -41,6 +42,7 @@ func tools() []Tool {
 		{Name: "curl", Run: curl.Main, Help: "transfer URLs"},
 		{Name: "head", Run: head.Main, Help: "first lines/bytes"},
 		{Name: "tail", Run: tail.Main, Help: "last lines/bytes"},
+		{Name: "tar", Run: tarcmd.Main, Help: "tape archiver"},
 		{Name: "tee", Run: tee.Main, Help: "stdin to stdout + files"},
 		{Name: "wc", Run: wc.Main, Help: "count lines/words/bytes"},
 		{Name: "wget", Run: wget.Main, Help: "download files"},
