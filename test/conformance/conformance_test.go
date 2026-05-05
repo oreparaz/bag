@@ -141,6 +141,27 @@ func TestGrepConformance(t *testing.T) {
 	Run(t, GrepCases(), realBin, bagBin)
 }
 
+// TestSedConformance runs the sed corpus against system sed + bag.
+func TestSedConformance(t *testing.T) {
+	realBin := resolveTool(t, "BAG_REAL_SED", "sed")
+	bagBin := buildBagAs(t, "sed")
+	Run(t, SedCases(), realBin, bagBin)
+}
+
+// TestCutConformance runs the cut corpus against system cut + bag.
+func TestCutConformance(t *testing.T) {
+	realBin := resolveTool(t, "BAG_REAL_CUT", "cut")
+	bagBin := buildBagAs(t, "cut")
+	Run(t, CutCases(), realBin, bagBin)
+}
+
+// TestUniqConformance runs the uniq corpus against system uniq + bag.
+func TestUniqConformance(t *testing.T) {
+	realBin := resolveTool(t, "BAG_REAL_UNIQ", "uniq")
+	bagBin := buildBagAs(t, "uniq")
+	Run(t, UniqCases(), realBin, bagBin)
+}
+
 func resolveTool(t *testing.T, env, fallback string) string {
 	t.Helper()
 	if v := os.Getenv(env); v != "" {
