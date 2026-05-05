@@ -134,6 +134,13 @@ func TestXXDConformance(t *testing.T) {
 	Run(t, XXDCases(), realBin, bagBin)
 }
 
+// TestGrepConformance runs the grep corpus against system grep + bag.
+func TestGrepConformance(t *testing.T) {
+	realBin := resolveTool(t, "BAG_REAL_GREP", "grep")
+	bagBin := buildBagAs(t, "grep")
+	Run(t, GrepCases(), realBin, bagBin)
+}
+
 func resolveTool(t *testing.T, env, fallback string) string {
 	t.Helper()
 	if v := os.Getenv(env); v != "" {

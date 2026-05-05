@@ -19,6 +19,7 @@ import (
 	"github.com/oreparaz/bag/internal/cmpressor"
 	"github.com/oreparaz/bag/internal/compress"
 	"github.com/oreparaz/bag/internal/curl"
+	"github.com/oreparaz/bag/internal/grep"
 	"github.com/oreparaz/bag/internal/head"
 	"github.com/oreparaz/bag/internal/tail"
 	"github.com/oreparaz/bag/internal/tarcmd"
@@ -41,6 +42,7 @@ func tools() []Tool {
 		{Name: "base64", Run: base64cmd.Main, Help: "encode/decode base64"},
 		{Name: "cat", Run: cat.Main, Help: "concatenate files"},
 		{Name: "curl", Run: curl.Main, Help: "transfer URLs"},
+		{Name: "grep", Run: grep.Main, Help: "search lines (RE2)"},
 		{Name: "head", Run: head.Main, Help: "first lines/bytes"},
 		{Name: "tail", Run: tail.Main, Help: "last lines/bytes"},
 		{Name: "tar", Run: tarcmd.Main, Help: "tape archiver"},
