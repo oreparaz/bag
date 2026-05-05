@@ -156,6 +156,26 @@ func TestInPlaceWithBackup(t *testing.T) {
 	}
 }
 
+// TestInPlacePreservesMode: a 0600-mode file should remain 0600 after
+// `sed -i` rewrites it. The original code clobbered modes to 0644.
+func TestInPlacePreservesMode(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "secret.conf")
+	os.WriteFile(p, []byte("hello\n"), 0o600)
+
+	exit := Main([]string{"-i", "s/hello/world/", p})
+	if exit != 0 {
+		t.Fatalf("exit=%d", exit)
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("mode after -i = %o, want 0600", info.Mode().Perm())
+	}
+}
+
 func TestUnsupportedCommand(t *testing.T) {
 	exit, _ := runSed(t, []byte("a\n"), "y/a/b/")
 	if exit == 0 {

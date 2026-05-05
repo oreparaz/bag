@@ -30,12 +30,20 @@ func (j *cookieJar) LoadInput(input string) error {
 		if eq < 0 {
 			continue
 		}
-		j.cookies = append(j.cookies, http.Cookie{Name: p[:eq], Value: p[eq+1:]})
+		c := http.Cookie{Name: p[:eq], Value: p[eq+1:]}
+		if !cookieFieldsSafe(c) {
+			continue // silently drop malformed pairs
+		}
+		j.cookies = append(j.cookies, c)
 	}
 	return nil
 }
 
 // LoadFile reads a Netscape-format cookies.txt.
+//
+// Untrusted cookie files: we drop entries whose name or value contains
+// CR/LF/NUL, because those would let a poisoned jar inject arbitrary
+// bytes into our outgoing Cookie header (header smuggling).
 func (j *cookieJar) LoadFile(path string) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -52,15 +60,44 @@ func (j *cookieJar) LoadFile(path string) error {
 		if len(fields) < 7 {
 			continue
 		}
-		j.cookies = append(j.cookies, http.Cookie{
+		c := http.Cookie{
 			Domain: fields[0],
 			Path:   fields[2],
 			Secure: strings.EqualFold(fields[3], "TRUE"),
 			Name:   fields[5],
 			Value:  fields[6],
-		})
+		}
+		if !cookieFieldsSafe(c) {
+			continue
+		}
+		j.cookies = append(j.cookies, c)
 	}
 	return sc.Err()
+}
+
+// cookieFieldsSafe reports whether a parsed cookie's Name, Value, Domain,
+// and Path are free of bytes that would smuggle past the HTTP header
+// boundary. We're deliberately strict: anything < 0x20 (except printable),
+// plus DEL, fails. This loses some exotic legacy cookies but closes the
+// header-injection vector cleanly.
+func cookieFieldsSafe(c http.Cookie) bool {
+	for _, s := range []string{c.Name, c.Value, c.Domain, c.Path} {
+		if !cookieByteSafe(s) {
+			return false
+		}
+	}
+	return true
+}
+
+func cookieByteSafe(s string) bool {
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		// Forbidden: CR, LF, NUL, DEL.
+		if b == '\r' || b == '\n' || b == 0x00 || b == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // HeaderFor returns the Cookie header value for the given URL, or "".

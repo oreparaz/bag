@@ -40,14 +40,24 @@ func run(args []string) int {
 
 // walk drives a custom filesystem walk so we can honor -prune and
 // -mindepth / -maxdepth without filepath.Walk's restrictions.
+//
+// When the expression contains a -delete action we walk depth-first
+// (children before parents) so that emptying a directory before
+// removing it actually works. GNU find implies -depth with -delete.
 type walkCtx struct {
 	root      string
 	expr      *node
 	hasAction bool
+	depthFirst bool
 }
 
 func walk(root string, expr *node, hasAction bool) error {
-	wc := &walkCtx{root: root, expr: expr, hasAction: hasAction}
+	wc := &walkCtx{
+		root:       root,
+		expr:       expr,
+		hasAction:  hasAction,
+		depthFirst: hasDeleteIn(expr),
+	}
 	rootInfo, err := os.Lstat(root)
 	if err != nil {
 		return err
@@ -55,42 +65,35 @@ func walk(root string, expr *node, hasAction bool) error {
 	return walkInner(wc, root, 0, rootInfo)
 }
 
+func hasDeleteIn(n *node) bool {
+	if n == nil {
+		return false
+	}
+	if n.op == "delete" {
+		return true
+	}
+	return hasDeleteIn(n.left) || hasDeleteIn(n.right)
+}
+
 func walkInner(wc *walkCtx, p string, depth int, info os.FileInfo) error {
+	if wc.depthFirst {
+		return walkDepthFirst(wc, p, depth, info)
+	}
+	return walkPreOrder(wc, p, depth, info)
+}
+
+func walkPreOrder(wc *walkCtx, p string, depth int, info os.FileInfo) error {
 	ent := entry{path: p, info: info, depth: depth}
 
 	matched, prune := evalExpr(wc.expr, &ent)
-	if matched {
-		if !wc.hasAction || ent.printed {
-			// Default action when no explicit action was requested OR if
-			// the expression hit -print already (printed flag set there).
-			if !wc.hasAction && !ent.printed {
-				fmt.Println(p)
-			}
-		}
+	if matched && !wc.hasAction && !ent.printed {
+		fmt.Println(p)
 	}
 	if prune {
 		return nil
 	}
 	if info.IsDir() {
-		entries, err := os.ReadDir(p)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "find: %s: %v\n", p, err)
-			return nil
-		}
-		for _, de := range entries {
-			// Preserve the user-supplied root prefix literally — GNU find
-			// outputs './big' not 'big' when invoked as `find .`.
-			// Hand-build the path with "/" separators to avoid Clean().
-			var child string
-			if p == "" {
-				child = de.Name()
-			} else if p == "/" {
-				child = "/" + de.Name()
-			} else if p[len(p)-1] == '/' {
-				child = p + de.Name()
-			} else {
-				child = p + "/" + de.Name()
-			}
+		for _, child := range readChildren(p) {
 			ci, err := os.Lstat(child)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "find: %s: %v\n", child, err)
@@ -102,6 +105,57 @@ func walkInner(wc *walkCtx, p string, depth int, info os.FileInfo) error {
 		}
 	}
 	return nil
+}
+
+// walkDepthFirst visits children before evaluating the parent. -prune is
+// effectively ignored here because the directory's children have already
+// been processed; that matches GNU find's documented behavior with -depth.
+func walkDepthFirst(wc *walkCtx, p string, depth int, info os.FileInfo) error {
+	if info.IsDir() {
+		for _, child := range readChildren(p) {
+			ci, err := os.Lstat(child)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "find: %s: %v\n", child, err)
+				continue
+			}
+			if err := walkInner(wc, child, depth+1, ci); err != nil {
+				return err
+			}
+		}
+	}
+	ent := entry{path: p, info: info, depth: depth}
+	matched, _ := evalExpr(wc.expr, &ent)
+	if matched && !wc.hasAction && !ent.printed {
+		fmt.Println(p)
+	}
+	return nil
+}
+
+// readChildren returns the child paths of dir, hand-built so the
+// user-supplied root prefix is preserved (GNU find emits './x' for
+// `find .`, never 'x').
+func readChildren(p string) []string {
+	entries, err := os.ReadDir(p)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "find: %s: %v\n", p, err)
+		return nil
+	}
+	out := make([]string, 0, len(entries))
+	for _, de := range entries {
+		var child string
+		switch {
+		case p == "":
+			child = de.Name()
+		case p == "/":
+			child = "/" + de.Name()
+		case p[len(p)-1] == '/':
+			child = p + de.Name()
+		default:
+			child = p + "/" + de.Name()
+		}
+		out = append(out, child)
+	}
+	return out
 }
 
 // entry captures everything per-file the predicates need.

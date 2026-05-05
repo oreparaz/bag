@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/oreparaz/bag/internal/safefs"
 )
 
 type unzipOptions struct {
@@ -134,16 +136,19 @@ func extractOne(f *zip.File, o *unzipOptions) error {
 	if o.junk {
 		rel = filepath.Base(rel)
 	}
-	if filepath.IsAbs(rel) || hasParentSegment(rel) {
+	if err := safefs.RefusePathTraversal(rel); err != nil {
 		return errors.New("refusing extraction outside output dir")
 	}
 	target := rel
 	if o.dir != "" {
 		target = filepath.Join(o.dir, rel)
 	}
+	if err := safefs.EnsureNoSymlinkInPath(target); err != nil {
+		return err
+	}
 
 	if strings.HasSuffix(f.Name, "/") {
-		return os.MkdirAll(target, f.Mode().Perm())
+		return safefs.MkdirAllNoSymlinkLeaf(target, f.Mode().Perm())
 	}
 
 	if o.pipe {
@@ -157,7 +162,7 @@ func extractOne(f *zip.File, o *unzipOptions) error {
 	}
 
 	if !o.overwrite {
-		if _, err := os.Stat(target); err == nil {
+		if _, err := os.Lstat(target); err == nil {
 			if o.never {
 				if !o.quiet {
 					fmt.Fprintf(os.Stderr, "  skipping: %s\n", target)
@@ -169,7 +174,7 @@ func extractOne(f *zip.File, o *unzipOptions) error {
 		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := safefs.MkdirAllNoSymlinkLeaf(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
 	mode := f.Mode()
@@ -186,7 +191,7 @@ func extractOne(f *zip.File, o *unzipOptions) error {
 		_ = os.Remove(target)
 		return os.Symlink(string(body), target)
 	}
-	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode.Perm()|0o600)
+	out, err := safefs.CreateTrunc(target, mode.Perm()|0o600)
 	if err != nil {
 		return err
 	}
@@ -215,15 +220,6 @@ func matchPatterns(name string, patterns []string) bool {
 	}
 	for _, p := range patterns {
 		if ok, _ := filepath.Match(p, name); ok {
-			return true
-		}
-	}
-	return false
-}
-
-func hasParentSegment(p string) bool {
-	for _, seg := range strings.Split(p, "/") {
-		if seg == ".." {
 			return true
 		}
 	}

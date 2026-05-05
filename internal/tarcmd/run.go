@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/oreparaz/bag/internal/compress"
+	"github.com/oreparaz/bag/internal/safefs"
 )
 
 type action int
@@ -243,17 +244,24 @@ func doExtractOrList(o *options, listOnly bool) error {
 func extractEntry(tr *tar.Reader, hdr *tar.Header, name string, o *options) error {
 	// Refuse absolute or .. components — security: tar entries from untrusted
 	// archives must not write outside the cwd.
-	if filepath.IsAbs(name) || hasParentSegment(name) {
+	if err := safefs.RefusePathTraversal(name); err != nil {
 		return fmt.Errorf("refusing extraction outside output dir: %q", hdr.Name)
+	}
+	// Refuse to write through any pre-existing symlink in the path —
+	// closes the "extract symlink dir, then file through it" attack.
+	if err := safefs.EnsureNoSymlinkInPath(name); err != nil {
+		return err
 	}
 	switch hdr.Typeflag {
 	case tar.TypeDir:
-		return os.MkdirAll(name, hdr.FileInfo().Mode().Perm())
+		return safefs.MkdirAllNoSymlinkLeaf(name, hdr.FileInfo().Mode().Perm())
 	case tar.TypeReg, tar.TypeRegA:
-		if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+		if err := safefs.MkdirAllNoSymlinkLeaf(filepath.Dir(name), 0o755); err != nil {
 			return err
 		}
-		f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, hdr.FileInfo().Mode().Perm())
+		// O_NOFOLLOW: refuse to overwrite a symlink leaf. O_TRUNC: allow
+		// overwriting an existing regular file (matches real tar default).
+		f, err := safefs.CreateTrunc(name, hdr.FileInfo().Mode().Perm())
 		if err != nil {
 			return err
 		}
@@ -267,30 +275,34 @@ func extractEntry(tr *tar.Reader, hdr *tar.Header, name string, o *options) erro
 		}
 		return nil
 	case tar.TypeSymlink:
-		if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+		if err := safefs.MkdirAllNoSymlinkLeaf(filepath.Dir(name), 0o755); err != nil {
 			return err
 		}
+		// We don't validate hdr.Linkname here — symlink targets can legally
+		// be absolute or contain ".." (Linux allows it). The danger is
+		// only when we'd write *through* the symlink, which is blocked by
+		// EnsureNoSymlinkInPath when subsequent entries arrive.
 		_ = os.Remove(name)
 		return os.Symlink(hdr.Linkname, name)
 	case tar.TypeLink:
-		if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+		// Hardlinks DO need their target validated: os.Link follows the
+		// target literally (relative to the cwd, since hardlinks don't
+		// "have" a path-resolution layer). A malicious archive with
+		// linkname='../../etc/passwd' would otherwise hard-link our
+		// extraction into the system's password file.
+		linkTarget := stripComponents(hdr.Linkname, o.strip)
+		if err := safefs.RefusePathTraversal(linkTarget); err != nil {
+			return fmt.Errorf("refusing hardlink to unsafe target %q", hdr.Linkname)
+		}
+		if err := safefs.MkdirAllNoSymlinkLeaf(filepath.Dir(name), 0o755); err != nil {
 			return err
 		}
 		_ = os.Remove(name)
-		return os.Link(stripComponents(hdr.Linkname, o.strip), name)
+		return os.Link(linkTarget, name)
 	default:
 		// Skip unsupported types: char/block devices, FIFOs, etc.
 		return nil
 	}
-}
-
-func hasParentSegment(p string) bool {
-	for _, seg := range strings.Split(p, "/") {
-		if seg == ".." {
-			return true
-		}
-	}
-	return false
 }
 
 func stripComponents(name string, n int) string {

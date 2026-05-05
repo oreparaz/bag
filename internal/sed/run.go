@@ -110,12 +110,18 @@ func processOne(name string, cmds []command, o *options) error {
 	}
 	defer closer()
 
-	// In-place output goes to a temp file, then renamed.
+	// In-place output goes to a temp file, then renamed. We capture the
+	// original file's mode so the rename preserves it (rather than
+	// silently downgrading 0600 secrets to 0644 etc.).
 	var out *bufio.Writer
 	var tmpPath string
 	var origPath string
+	var origMode os.FileMode = 0o644
 	cleanup := func() {}
 	if o.inPlace && name != "-" {
+		if info, err := os.Stat(name); err == nil {
+			origMode = info.Mode().Perm()
+		}
 		dir := "."
 		if i := strings.LastIndexByte(name, '/'); i >= 0 {
 			dir = name[:i]
@@ -191,6 +197,13 @@ func processOne(name string, cmds []command, o *options) error {
 	// Backup + rename for in-place.
 	if o.inPlace && tmpPath != "" {
 		out.Flush()
+		// Preserve the original file's mode by chmod'ing the temp before
+		// rename. Rename is atomic on the same filesystem; doing the
+		// chmod first means there's no window where the file has the
+		// wrong mode.
+		if err := os.Chmod(tmpPath, origMode); err != nil {
+			return err
+		}
 		if o.backupExt != "" {
 			if err := os.Rename(origPath, origPath+o.backupExt); err != nil {
 				return err
@@ -199,7 +212,6 @@ func processOne(name string, cmds []command, o *options) error {
 		if err := os.Rename(tmpPath, origPath); err != nil {
 			return err
 		}
-		_ = os.Chmod(origPath, 0o644)
 	}
 	return nil
 }

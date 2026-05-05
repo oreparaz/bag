@@ -210,6 +210,34 @@ func wantIs(s string, exts ...string) bool {
 	return false
 }
 
+// TestRefuseSymlinkOutput: a pre-existing symlink at the output path
+// must NOT be followed, even with -f. Otherwise an attacker could
+// pre-place a symlink to /etc/passwd in a shared directory.
+func TestRefuseSymlinkOutput(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "data.txt")
+	if err := os.WriteFile(src, []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "victim")
+	if err := os.WriteFile(target, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, src+".gz"); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := Tool{Name: "gzip", Format: compress.FormatGzip}
+	exit := Main(tool, []string{"-fk", src})
+	if exit == 0 {
+		t.Errorf("expected non-zero exit when output is a symlink")
+	}
+	body, _ := os.ReadFile(target)
+	if string(body) != "original" {
+		t.Errorf("symlink target was clobbered: %q", body)
+	}
+}
+
 func TestUnknownFlag(t *testing.T) {
 	tool := Tool{Name: "gzip", Format: compress.FormatGzip}
 	exit, _ := runCmpressor(t, tool, []byte("x\n"), "--no-such-flag")

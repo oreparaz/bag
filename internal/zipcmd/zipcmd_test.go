@@ -143,6 +143,37 @@ func TestZipJunk(t *testing.T) {
 	}
 }
 
+// TestZipRefuseSymlinkTraversal: an archive containing a symlink that
+// points outside the destination, followed by a file "through" the
+// symlink, must not write outside the destination.
+func TestZipRefuseSymlinkTraversal(t *testing.T) {
+	dir := t.TempDir()
+	old, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(old)
+
+	os.MkdirAll("escape-target", 0o755)
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	// Symlink "escape" -> "../escape-target".
+	hdr := &zip.FileHeader{Name: "escape"}
+	hdr.SetMode(os.ModeSymlink | 0o777)
+	w, _ := zw.CreateHeader(hdr)
+	w.Write([]byte("../escape-target"))
+	// Regular file via the symlink.
+	w2, _ := zw.Create("escape/innocent.txt")
+	w2.Write([]byte("boom\n"))
+	zw.Close()
+
+	os.Mkdir("dest", 0o755)
+	os.WriteFile("evil.zip", buf.Bytes(), 0o644)
+	_, _, _ = runMain(t, "unzip", nil, "-q", "evil.zip", "-d", "dest")
+	if _, err := os.Stat("escape-target/innocent.txt"); err == nil {
+		t.Errorf("file landed outside the extraction dir")
+	}
+}
+
 func TestZipRefuseEvilEntry(t *testing.T) {
 	dir := t.TempDir()
 	old, _ := os.Getwd()

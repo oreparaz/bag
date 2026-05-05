@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/oreparaz/bag/internal/compress"
+	"github.com/oreparaz/bag/internal/safefs"
 )
 
 // Tool selects the format and the default mode based on the program name.
@@ -277,18 +278,27 @@ func openIn(name string) (io.Reader, func(), error) {
 // Rules:
 //   - stdout if -c, or input is stdin and -o not given.
 //   - <name><ext> otherwise; refuse to overwrite without -f.
+//
+// We use atomic O_EXCL/O_TRUNC + O_NOFOLLOW: this closes the
+// stat-then-create TOCTOU and refuses to follow a leaf symlink. A
+// pre-existing symlink at the output path is rejected even with -f
+// (matches the safer subset of GNU gzip's behavior).
 func openCompressOut(t Tool, o *options, in string) (io.Writer, func() error, string, error) {
 	if o.stdout || in == "-" {
 		return os.Stdout, func() error { return nil }, "", nil
 	}
 	out := in + t.defaultExt()
-	if !o.force {
-		if _, err := os.Stat(out); err == nil {
+	var f *os.File
+	var err error
+	if o.force {
+		f, err = safefs.CreateTrunc(out, 0o644)
+	} else {
+		f, err = safefs.CreateExcl(out, 0o644)
+	}
+	if err != nil {
+		if !o.force && os.IsExist(err) {
 			return nil, nil, "", fmt.Errorf("%s already exists; use -f to force", out)
 		}
-	}
-	f, err := os.Create(out)
-	if err != nil {
 		return nil, nil, "", err
 	}
 	return f, f.Close, out, nil
@@ -301,6 +311,8 @@ func openCompressOut(t Tool, o *options, in string) (io.Writer, func() error, st
 //   - strip the format extension from the input name; refuse to overwrite
 //     without -f.
 //   - if there is no recognized extension, we fail (matches gzip).
+//
+// Same atomic open as openCompressOut; same symlink-refusal stance.
 func openDecompressOut(t Tool, o *options, in string) (io.Writer, func() error, string, error) {
 	if o.stdout || in == "-" {
 		return os.Stdout, func() error { return nil }, "", nil
@@ -309,13 +321,16 @@ func openDecompressOut(t Tool, o *options, in string) (io.Writer, func() error, 
 	if err != nil {
 		return nil, nil, "", err
 	}
-	if !o.force {
-		if _, err := os.Stat(out); err == nil {
+	var f *os.File
+	if o.force {
+		f, err = safefs.CreateTrunc(out, 0o644)
+	} else {
+		f, err = safefs.CreateExcl(out, 0o644)
+	}
+	if err != nil {
+		if !o.force && os.IsExist(err) {
 			return nil, nil, "", fmt.Errorf("%s already exists; use -f to force", out)
 		}
-	}
-	f, err := os.Create(out)
-	if err != nil {
 		return nil, nil, "", err
 	}
 	return f, f.Close, out, nil

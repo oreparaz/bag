@@ -167,3 +167,25 @@ func TestExec(t *testing.T) {
 		t.Errorf("exit=%d", exit)
 	}
 }
+
+// TestDeleteEmptiesDirsFirst: -delete on a non-empty tree must remove
+// children before parents (GNU find implies -depth with -delete).
+func TestDeleteEmptiesDirsFirst(t *testing.T) {
+	dir := t.TempDir()
+	subdir := filepath.Join(dir, "to-remove")
+	os.MkdirAll(subdir, 0o755)
+	os.WriteFile(filepath.Join(subdir, "x"), []byte(""), 0o644)
+	os.WriteFile(filepath.Join(subdir, "y"), []byte(""), 0o644)
+
+	exit, _ := runFind(t, dir, "-mindepth", "1", "-delete")
+	if exit != 0 {
+		t.Fatalf("delete exit=%d", exit)
+	}
+	if _, err := os.Stat(subdir); err == nil {
+		t.Errorf("subdir not removed")
+	}
+	// dir itself must still exist (-mindepth 1 protects the root).
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("dir went away: %v", err)
+	}
+}

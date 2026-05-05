@@ -3,6 +3,33 @@
 A running list of features and tools we may want to add later. Items are
 roughly grouped, not prioritized. Open an issue to bump something up.
 
+## Known security limitations
+
+Bag's archive and codec tools have been audited and hardened (see
+`internal/safefs`), but a few residual risks are accepted for the 80%
+target:
+
+- **Curl / wget output to a pre-existing symlink**: real curl and wget
+  follow symlinks at their `-o` / default destination. We match that
+  for drop-in compatibility. If you pass an untrusted destination
+  directory, set the cwd to a freshly-created tempdir.
+- **TOCTOU between Lstat and OpenFile**: a sufficiently fast attacker
+  could swap a directory for a symlink between the path-walk check and
+  the leaf open. The `O_NOFOLLOW` on the leaf prevents the worst
+  outcome, but opening through a fully-controlled symlink chain is not
+  airtight without `openat`-style ascent (which Go doesn't expose
+  portably). Tracking as a follow-up.
+- **Decompression bombs**: gzip / bzip2 / xz / zstd readers stream, so
+  memory is bounded. There is no `--max-output` flag, so disk space is
+  the user's responsibility (matches GNU defaults).
+- **Multipart curl bodies in memory**: `-F` builds the multipart body
+  in a `bytes.Buffer` rather than streaming. Acceptable up to a few
+  hundred MB; larger uploads should use real curl until we add a
+  streaming multipart writer.
+- **Sort loads everything in memory**: external sorting for >RAM input
+  is not implemented. Use `LC_ALL=C sort -S 50%` with real sort for
+  huge inputs.
+
 ## More tools to add to the bag
 
 - `tr`

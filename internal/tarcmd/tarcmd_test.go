@@ -168,6 +168,75 @@ func TestStripComponents(t *testing.T) {
 	}
 }
 
+// TestRefuseSymlinkTraversal exercises the classic "extract symlink dir,
+// then file through it" attack and verifies the second entry is refused.
+func TestRefuseSymlinkTraversal(t *testing.T) {
+	dir := t.TempDir()
+	old, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(old)
+
+	// Create a real target outside the extraction dir.
+	os.MkdirAll("escape-target", 0o755)
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	// Step 1: create a symlink "escape" -> "escape-target" (relative).
+	tw.WriteHeader(&tar.Header{
+		Name:     "escape",
+		Linkname: "../escape-target",
+		Typeflag: tar.TypeSymlink,
+		Mode:     0o777,
+	})
+	// Step 2: write a file "escape/innocent.txt" — would write through.
+	tw.WriteHeader(&tar.Header{Name: "escape/innocent.txt", Size: 5, Mode: 0o644})
+	tw.Write([]byte("boom\n"))
+	tw.Close()
+
+	os.Mkdir("dest", 0o755)
+	os.WriteFile("evil.tar", buf.Bytes(), 0o644)
+	exit, _, _ := runTar(t, nil, "-xf", "evil.tar", "-C", "dest")
+	// Extraction should have failed for the second entry; whether the
+	// process exits 0 or 2 depends on how strict we want to be about
+	// partial archives. We assert the file did NOT land outside dest.
+	_ = exit
+	if _, err := os.Stat("escape-target/innocent.txt"); err == nil {
+		t.Errorf("escape: file written outside extract dir")
+	}
+}
+
+// TestRefuseHardlinkTraversal asserts hardlink entries cannot point
+// outside the extraction tree.
+func TestRefuseHardlinkTraversal(t *testing.T) {
+	dir := t.TempDir()
+	old, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(old)
+
+	// Pretend /etc/passwd content; we just need a file outside the dir.
+	os.WriteFile("outside.txt", []byte("secret\n"), 0o644)
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	tw.WriteHeader(&tar.Header{
+		Name:     "trick",
+		Linkname: "../outside.txt",
+		Typeflag: tar.TypeLink,
+		Mode:     0o644,
+	})
+	tw.Close()
+
+	os.Mkdir("dest", 0o755)
+	os.WriteFile("evil.tar", buf.Bytes(), 0o644)
+	exit, _, stderr := runTar(t, nil, "-xf", "evil.tar", "-C", "dest")
+	if exit == 0 {
+		t.Errorf("expected non-zero exit for hardlink with traversal target")
+	}
+	if !bytes.Contains(stderr, []byte("refusing")) {
+		t.Errorf("expected refusal in stderr: %s", stderr)
+	}
+}
+
 func TestRefuseAbsoluteOrParent(t *testing.T) {
 	dir := t.TempDir()
 	old, _ := os.Getwd()

@@ -419,6 +419,34 @@ func TestNoURL(t *testing.T) {
 	}
 }
 
+// TestCookieJarRefusesCRLFInjection: a malicious cookies.txt where the
+// value contains a bare CR (which bufio's line scanner would NOT split
+// on) must be dropped. Otherwise HeaderFor would emit
+// "Cookie: name=val\rX-Pwn: yes" — header smuggling.
+func TestCookieJarRefusesCRLFInjection(t *testing.T) {
+	dir := t.TempDir()
+	jar := filepath.Join(dir, "evil-jar.txt")
+	body := "# Netscape HTTP Cookie File\n" +
+		"127.0.0.1\tFALSE\t/\tFALSE\t0\tname\tval\rX-Pwn: yes\n"
+	if err := os.WriteFile(jar, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := mustStartServer(t)
+	exit, out := runCurl(t, "-s", "-b", jar, srv.HTTP.URL+"/cookies")
+	if exit != 0 {
+		t.Fatalf("exit=%d", exit)
+	}
+	// The poisoned cookie should be dropped — server sees no cookies.
+	if strings.Contains(string(out), "X-Pwn") {
+		t.Errorf("smuggled header into request: %q", out)
+	}
+	// And the cookie's "name" key shouldn't have made it through, since
+	// its value carried unsafe bytes.
+	if strings.Contains(string(out), `"name"`) {
+		t.Errorf("dangerous cookie was loaded: %q", out)
+	}
+}
+
 func TestRetryOnConnectFailure(t *testing.T) {
 	// Bind a TCP listener and immediately close it. Connection refused.
 	exit, _ := runCurl(t, "-s", "--retry", "2", "--retry-delay", "0", "http://127.0.0.1:1")
