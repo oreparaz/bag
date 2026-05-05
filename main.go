@@ -22,7 +22,9 @@ import (
 	"github.com/oreparaz/bag/internal/cut"
 	"github.com/oreparaz/bag/internal/grep"
 	"github.com/oreparaz/bag/internal/head"
+	"github.com/oreparaz/bag/internal/hexdump"
 	"github.com/oreparaz/bag/internal/sed"
+	bagsort "github.com/oreparaz/bag/internal/sort"
 	"github.com/oreparaz/bag/internal/tail"
 	"github.com/oreparaz/bag/internal/tarcmd"
 	"github.com/oreparaz/bag/internal/tee"
@@ -48,7 +50,9 @@ func tools() []Tool {
 		{Name: "cut", Run: cut.Main, Help: "select fields/bytes"},
 		{Name: "grep", Run: grep.Main, Help: "search lines (RE2)"},
 		{Name: "head", Run: head.Main, Help: "first lines/bytes"},
+		{Name: "hexdump", Run: hexdump.Main, Help: "BSD hex dump"},
 		{Name: "sed", Run: sed.Main, Help: "stream editor (subset)"},
+		{Name: "sort", Run: bagsort.Main, Help: "sort lines"},
 		{Name: "tail", Run: tail.Main, Help: "last lines/bytes"},
 		{Name: "tar", Run: tarcmd.Main, Help: "tape archiver"},
 		{Name: "tee", Run: tee.Main, Help: "stdin to stdout + files"},

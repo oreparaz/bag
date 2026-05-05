@@ -162,6 +162,20 @@ func TestUniqConformance(t *testing.T) {
 	Run(t, UniqCases(), realBin, bagBin)
 }
 
+// TestSortConformance runs the sort corpus against system sort + bag.
+func TestSortConformance(t *testing.T) {
+	realBin := resolveTool(t, "BAG_REAL_SORT", "sort")
+	bagBin := buildBagAs(t, "sort")
+	Run(t, SortCases(), realBin, bagBin)
+}
+
+// TestHexdumpConformance runs the hexdump corpus against system hexdump + bag.
+func TestHexdumpConformance(t *testing.T) {
+	realBin := resolveTool(t, "BAG_REAL_HEXDUMP", "hexdump")
+	bagBin := buildBagAs(t, "hexdump")
+	Run(t, HexdumpCases(), realBin, bagBin)
+}
+
 func resolveTool(t *testing.T, env, fallback string) string {
 	t.Helper()
 	if v := os.Getenv(env); v != "" {

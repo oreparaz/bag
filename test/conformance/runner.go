@@ -204,11 +204,15 @@ func runCmd(t *testing.T, bin string, args []string, cwd string, stdin []byte) c
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
 	// Provide an isolated env: we rely on PATH for bash/dns but otherwise
-	// nothing leaks in (no proxies, no curlrc).
+	// nothing leaks in (no proxies, no curlrc). LC_ALL=C makes sort and
+	// other locale-aware tools pick the byte collation that bag uses by
+	// default — keeping the conformance comparison apples-to-apples.
 	cmd.Env = []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + cwd,
 		"NO_PROXY=*",
+		"LC_ALL=C",
+		"LANG=C",
 	}
 	err := cmd.Run()
 	exit := 0
