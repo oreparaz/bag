@@ -33,6 +33,7 @@ Why?
 | `unzip`    | usable | -l list, -p stdout, -d DIR, -j, -o, -n                     |
 | `grep`     | usable | RE2 backend; -i -v -c -l -L -n -r -E -F -w -A/-B/-C        |
 | `ag`       | usable | recursive default, smart-case, .gitignore + binary skip    |
+| `vi`       | usable | modal editor, syntax highlight, yank/paste, undo, search   |
 | `sed`      | subset | s/// with g/i/p/Nth, d, p, q, addresses, -i in-place       |
 | `cut`      | usable | -f/-c/-b LIST with -d, --output-delimiter, --complement    |
 | `sort`     | usable | -n -r -u -f -b -k key -t sep -o; byte locale (C)           |
