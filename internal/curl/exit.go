@@ -52,7 +52,16 @@ func classify(err error) int {
 		return exitCouldntResolve
 	}
 
-	// TLS verification — unknown authority etc.
+	// TLS verification. Order matters: tls.CertificateVerificationError
+	// is the wrapper used by Go 1.20+ on every platform; on Linux it
+	// generally unwraps to one of the x509 types, but on macOS (where
+	// cgo-enabled Go uses Apple's Security framework for verification)
+	// the underlying error is opaque. We catch the wrapper directly and
+	// also keep the x509 unwrap paths for clarity.
+	var verifyErr *tls.CertificateVerificationError
+	if errors.As(err, &verifyErr) {
+		return exitSSLCACertBad
+	}
 	var unkAuth x509.UnknownAuthorityError
 	if errors.As(err, &unkAuth) {
 		return exitSSLCACertBad

@@ -30,7 +30,14 @@ func classify(err error) int {
 		return exitOK
 	}
 
-	// TLS verification.
+	// TLS verification. tls.CertificateVerificationError covers both
+	// pure-Go x509 verification (Linux) and cgo-backed Security
+	// framework verification (macOS). We keep the x509 unwrap paths
+	// for clarity.
+	var verifyErr *tls.CertificateVerificationError
+	if errors.As(err, &verifyErr) {
+		return exitSSLVerify
+	}
 	var unkAuth x509.UnknownAuthorityError
 	if errors.As(err, &unkAuth) {
 		return exitSSLVerify
