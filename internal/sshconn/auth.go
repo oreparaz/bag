@@ -1,4 +1,4 @@
-package ssh
+package sshconn
 
 import (
 	"errors"
@@ -10,8 +10,6 @@ import (
 	"golang.org/x/term"
 )
 
-// defaultIdentityFiles lists the private-key paths we try when -i is
-// not given. Order matches openssh's preference (Ed25519 → ECDSA → RSA).
 func defaultIdentityFiles(home string) []string {
 	return []string{
 		filepath.Join(home, ".ssh", "id_ed25519"),
@@ -20,17 +18,11 @@ func defaultIdentityFiles(home string) []string {
 	}
 }
 
-// loadAuthMethods builds the []ssh.AuthMethod list:
-//
-//  1. PublicKeys parsed from explicit -i (or default identities)
-//  2. KeyboardInteractive / Password prompt as a fallback
-//
-// Encrypted keys are decrypted via passphrase prompt.
-func loadAuthMethods(o *options) ([]ssh.AuthMethod, error) {
+func loadAuthMethods(o Options) ([]ssh.AuthMethod, error) {
 	home, _ := os.UserHomeDir()
 	var keyPaths []string
-	if o.identityFile != "" {
-		keyPaths = []string{o.identityFile}
+	if o.IdentityFile != "" {
+		keyPaths = []string{o.IdentityFile}
 	} else {
 		keyPaths = defaultIdentityFiles(home)
 	}
@@ -39,8 +31,8 @@ func loadAuthMethods(o *options) ([]ssh.AuthMethod, error) {
 	for _, p := range keyPaths {
 		s, err := loadSigner(p)
 		if err != nil {
-			if !errors.Is(err, os.ErrNotExist) && o.verbose {
-				fmt.Fprintf(os.Stderr, "ssh: %s: %v\n", p, err)
+			if !errors.Is(err, os.ErrNotExist) && o.Verbose {
+				fmt.Fprintf(stderrW(), "ssh: %s: %v\n", p, err)
 			}
 			continue
 		}
@@ -51,20 +43,13 @@ func loadAuthMethods(o *options) ([]ssh.AuthMethod, error) {
 	if len(signers) > 0 {
 		methods = append(methods, ssh.PublicKeys(signers...))
 	}
-
-	// Always offer password as a last resort. openssh-equivalent.
 	methods = append(methods, ssh.PasswordCallback(func() (string, error) {
-		return promptPassword(fmt.Sprintf("%s@%s's password: ", o.user, o.host))
+		return promptPassword(fmt.Sprintf("%s@%s's password: ", o.User, o.Host))
 	}))
-
-	// Keyboard-interactive (prompts for many-step challenges).
 	methods = append(methods, ssh.KeyboardInteractive(keyboardInteractive(o)))
-
 	return methods, nil
 }
 
-// loadSigner reads a private key from path. If the key is encrypted,
-// prompts for a passphrase.
 func loadSigner(path string) (ssh.Signer, error) {
 	pem, err := os.ReadFile(path)
 	if err != nil {
@@ -85,8 +70,6 @@ func loadSigner(path string) (ssh.Signer, error) {
 	return nil, err
 }
 
-// promptPassword reads a line from /dev/tty with echo off. Falls back
-// to stdin echo-off when /dev/tty isn't available.
 func promptPassword(prompt string) (string, error) {
 	fmt.Fprint(os.Stderr, prompt)
 	defer fmt.Fprintln(os.Stderr)
@@ -107,11 +90,7 @@ func promptPassword(prompt string) (string, error) {
 	return string(bytes), nil
 }
 
-// keyboardInteractive returns a callback that surfaces server prompts
-// to the user and echoes their typed answers back to the SSH layer.
-// We turn echo off for prompts where the server flagged the answer as
-// "secret" via the prompt-echo flag.
-func keyboardInteractive(o *options) ssh.KeyboardInteractiveChallenge {
+func keyboardInteractive(o Options) ssh.KeyboardInteractiveChallenge {
 	return func(name, instruction string, questions []string, echos []bool) ([]string, error) {
 		if name != "" {
 			fmt.Fprintln(os.Stderr, name)
@@ -140,3 +119,8 @@ func keyboardInteractive(o *options) ssh.KeyboardInteractiveChallenge {
 		return answers, nil
 	}
 }
+
+// stderrW returns os.Stderr (or io.Discard if it's somehow nil). The
+// indirection keeps callers from leaking direct os.Stderr references
+// when this package is reused inside tests that capture stderr.
+func stderrW() *os.File { return os.Stderr }

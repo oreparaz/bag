@@ -55,6 +55,17 @@ target:
 - Parallelism — search is sequential
 - `--print0` filename separator on output bodies (only `-l` / `-L` supports `-0`)
 
+## scp features intentionally deferred
+
+- SFTP-based scp (newer openssh default; we speak the classic scp
+  wire protocol, which every standard sshd still implements)
+- Remote-to-remote copy (would need a second connection)
+- `-3` triangle copy (route via the local host)
+- `-l LIMIT` bandwidth cap
+- `-C` compression
+- `-J` ProxyJump
+- Glob expansion of remote sources (the remote shell does it for now)
+
 ## sed features intentionally deferred
 
 - `a` / `i` / `c` (append, insert, change)

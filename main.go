@@ -25,6 +25,7 @@ import (
 	"github.com/oreparaz/bag/internal/grep"
 	"github.com/oreparaz/bag/internal/head"
 	"github.com/oreparaz/bag/internal/hexdump"
+	"github.com/oreparaz/bag/internal/scp"
 	"github.com/oreparaz/bag/internal/sed"
 	bagsort "github.com/oreparaz/bag/internal/sort"
 	bagssh "github.com/oreparaz/bag/internal/ssh"
@@ -57,6 +58,7 @@ func tools() []Tool {
 		{Name: "grep", Run: grep.Main, Help: "search lines (RE2)"},
 		{Name: "head", Run: head.Main, Help: "first lines/bytes"},
 		{Name: "hexdump", Run: hexdump.Main, Help: "BSD hex dump"},
+		{Name: "scp", Run: scp.Main, Help: "secure copy (over SSH)"},
 		{Name: "sed", Run: sed.Main, Help: "stream editor (subset)"},
 		{Name: "sort", Run: bagsort.Main, Help: "sort lines"},
 		{Name: "ssh", Run: bagssh.Main, Help: "minimal SSH client"},

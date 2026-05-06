@@ -1,4 +1,4 @@
-package ssh
+package sshconn
 
 import (
 	"bufio"
@@ -13,28 +13,19 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
-// hostKeyVerifier returns an ssh.HostKeyCallback that:
-//
-//   - if --insecure (-o StrictHostKeyChecking=no) is set, accepts every key
-//   - otherwise checks against ~/.ssh/known_hosts (or the override path)
-//   - on first connect, prompts the user to accept the fingerprint
-//   - on key change, refuses the connection
-func hostKeyVerifier(o *options) (ssh.HostKeyCallback, error) {
-	if o.insecure {
+func hostKeyVerifier(o Options) (ssh.HostKeyCallback, error) {
+	if o.Insecure {
 		return ssh.InsecureIgnoreHostKey(), nil
 	}
 
-	path := o.knownHostsPath
+	path := o.KnownHostsPath
 	if path == "" {
 		home, _ := os.UserHomeDir()
 		path = filepath.Join(home, ".ssh", "known_hosts")
 	}
-
-	// Ensure the file exists; knownhosts.New errors out if not.
 	if err := ensureFileExists(path); err != nil {
 		return nil, fmt.Errorf("known_hosts: %w", err)
 	}
-
 	hk, err := knownhosts.New(path)
 	if err != nil {
 		return nil, fmt.Errorf("known_hosts: %w", err)
@@ -47,10 +38,8 @@ func hostKeyVerifier(o *options) (ssh.HostKeyCallback, error) {
 			var keyErr *knownhosts.KeyError
 			if errors.As(err, &keyErr) {
 				if len(keyErr.Want) > 0 {
-					// Mismatch — refuse.
 					return fmt.Errorf("REMOTE HOST IDENTIFICATION HAS CHANGED for %s: known fingerprint mismatch", hostname)
 				}
-				// No known entry — TOFU prompt.
 				if !promptAcceptKey(hostname, key) {
 					return errors.New("host key not accepted")
 				}
@@ -61,8 +50,6 @@ func hostKeyVerifier(o *options) (ssh.HostKeyCallback, error) {
 	}, nil
 }
 
-// ensureFileExists creates an empty known_hosts file if it doesn't
-// already exist, with parent dirs.
 func ensureFileExists(path string) error {
 	if _, err := os.Stat(path); err == nil {
 		return nil
@@ -77,7 +64,6 @@ func ensureFileExists(path string) error {
 	return f.Close()
 }
 
-// promptAcceptKey shows the fingerprint and reads yes/no.
 func promptAcceptKey(host string, key ssh.PublicKey) bool {
 	fingerprint := ssh.FingerprintSHA256(key)
 	fmt.Fprintf(os.Stderr, "The authenticity of host '%s' can't be established.\n", host)
@@ -89,9 +75,6 @@ func promptAcceptKey(host string, key ssh.PublicKey) bool {
 	return line == "yes" || line == "y"
 }
 
-// appendKnownHost appends one host-key entry in OpenSSH known_hosts
-// format. We use `knownhosts.Line` which produces a non-hashed entry —
-// hashed entries are deferred (FUTURE.md).
 func appendKnownHost(path, hostname string, key ssh.PublicKey) error {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o600)
 	if err != nil {
