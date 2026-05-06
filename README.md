@@ -41,6 +41,16 @@ Why?
 
 See [FUTURE.md](FUTURE.md) for the wish list.
 
+## Supported platforms
+
+| Platform               | CI coverage                              |
+|------------------------|------------------------------------------|
+| Linux (glibc, musl)    | Unit tests + cross-tool conformance against the host's GNU coreutils on Ubuntu 24.04, Debian 12, Alpine 3.20, Fedora 40 |
+| macOS (Apple Silicon)  | Unit tests + codec / zip roundtrip against the system's BSD-flavored binaries; the GNU-comparison corpus is skipped because macOS ships BSD coreutils |
+
+The conformance corpus targets GNU/Linux semantics — `Test*Conformance`
+tests `t.Skip()` themselves on non-Linux hosts via `skipUnlessGNUHost`.
+
 ## Usage
 
 There are three equivalent ways to invoke a tool:

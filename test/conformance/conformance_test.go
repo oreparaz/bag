@@ -70,8 +70,22 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	return nil
 }
 
+// skipUnlessGNUHost is called by every cross-binary corpus test to bail
+// out cleanly on hosts that ship BSD-flavored tools (most importantly
+// macOS). The corpus targets GNU/Linux semantics; cross-comparing
+// against BSD curl/sed/grep/find/tail/etc. produces noise rather than
+// signal. We still run the codec/zip roundtrip suites because those
+// test bag's interop with whichever binary the host ships.
+func skipUnlessGNUHost(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skipf("conformance corpus targets GNU/Linux semantics; %s host has BSD-flavored tools", runtime.GOOS)
+	}
+}
+
 // TestCurlConformance runs the curl corpus against system curl + bag.
 func TestCurlConformance(t *testing.T) {
+	skipUnlessGNUHost(t)
 	realBin := resolveTool(t, "BAG_REAL_CURL", "curl")
 	bagBin := buildBagCurl(t)
 	Run(t, CurlCases(), realBin, bagBin)
@@ -79,6 +93,7 @@ func TestCurlConformance(t *testing.T) {
 
 // TestWgetConformance runs the wget corpus against system wget + bag.
 func TestWgetConformance(t *testing.T) {
+	skipUnlessGNUHost(t)
 	realBin := resolveTool(t, "BAG_REAL_WGET", "wget")
 	bagBin := buildBagWget(t)
 	Run(t, WgetCases(), realBin, bagBin)
@@ -86,6 +101,7 @@ func TestWgetConformance(t *testing.T) {
 
 // TestCatConformance runs the cat corpus against system cat + bag.
 func TestCatConformance(t *testing.T) {
+	skipUnlessGNUHost(t)
 	realBin := resolveTool(t, "BAG_REAL_CAT", "cat")
 	bagBin := buildBagAs(t, "cat")
 	Run(t, CatCases(), realBin, bagBin)
@@ -93,6 +109,7 @@ func TestCatConformance(t *testing.T) {
 
 // TestHeadConformance runs the head corpus against system head + bag.
 func TestHeadConformance(t *testing.T) {
+	skipUnlessGNUHost(t)
 	realBin := resolveTool(t, "BAG_REAL_HEAD", "head")
 	bagBin := buildBagAs(t, "head")
 	Run(t, HeadCases(), realBin, bagBin)
@@ -100,6 +117,7 @@ func TestHeadConformance(t *testing.T) {
 
 // TestTailConformance runs the tail corpus against system tail + bag.
 func TestTailConformance(t *testing.T) {
+	skipUnlessGNUHost(t)
 	realBin := resolveTool(t, "BAG_REAL_TAIL", "tail")
 	bagBin := buildBagAs(t, "tail")
 	Run(t, TailCases(), realBin, bagBin)
@@ -107,6 +125,7 @@ func TestTailConformance(t *testing.T) {
 
 // TestBase64Conformance runs the base64 corpus against system base64 + bag.
 func TestBase64Conformance(t *testing.T) {
+	skipUnlessGNUHost(t)
 	realBin := resolveTool(t, "BAG_REAL_BASE64", "base64")
 	bagBin := buildBagAs(t, "base64")
 	Run(t, Base64Cases(), realBin, bagBin)
@@ -114,6 +133,7 @@ func TestBase64Conformance(t *testing.T) {
 
 // TestTeeConformance runs the tee corpus against system tee + bag.
 func TestTeeConformance(t *testing.T) {
+	skipUnlessGNUHost(t)
 	realBin := resolveTool(t, "BAG_REAL_TEE", "tee")
 	bagBin := buildBagAs(t, "tee")
 	Run(t, TeeCases(), realBin, bagBin)
@@ -121,6 +141,7 @@ func TestTeeConformance(t *testing.T) {
 
 // TestWCConformance runs the wc corpus against system wc + bag.
 func TestWCConformance(t *testing.T) {
+	skipUnlessGNUHost(t)
 	realBin := resolveTool(t, "BAG_REAL_WC", "wc")
 	bagBin := buildBagAs(t, "wc")
 	Run(t, WCCases(), realBin, bagBin)
@@ -129,6 +150,7 @@ func TestWCConformance(t *testing.T) {
 // TestXXDConformance runs the xxd corpus against system xxd + bag.
 // Skipped automatically when xxd isn't installed on the system.
 func TestXXDConformance(t *testing.T) {
+	skipUnlessGNUHost(t)
 	realBin := resolveTool(t, "BAG_REAL_XXD", "xxd")
 	bagBin := buildBagAs(t, "xxd")
 	Run(t, XXDCases(), realBin, bagBin)
@@ -136,6 +158,7 @@ func TestXXDConformance(t *testing.T) {
 
 // TestGrepConformance runs the grep corpus against system grep + bag.
 func TestGrepConformance(t *testing.T) {
+	skipUnlessGNUHost(t)
 	realBin := resolveTool(t, "BAG_REAL_GREP", "grep")
 	bagBin := buildBagAs(t, "grep")
 	Run(t, GrepCases(), realBin, bagBin)
@@ -143,6 +166,7 @@ func TestGrepConformance(t *testing.T) {
 
 // TestSedConformance runs the sed corpus against system sed + bag.
 func TestSedConformance(t *testing.T) {
+	skipUnlessGNUHost(t)
 	realBin := resolveTool(t, "BAG_REAL_SED", "sed")
 	bagBin := buildBagAs(t, "sed")
 	Run(t, SedCases(), realBin, bagBin)
@@ -150,6 +174,7 @@ func TestSedConformance(t *testing.T) {
 
 // TestCutConformance runs the cut corpus against system cut + bag.
 func TestCutConformance(t *testing.T) {
+	skipUnlessGNUHost(t)
 	realBin := resolveTool(t, "BAG_REAL_CUT", "cut")
 	bagBin := buildBagAs(t, "cut")
 	Run(t, CutCases(), realBin, bagBin)
@@ -157,6 +182,7 @@ func TestCutConformance(t *testing.T) {
 
 // TestUniqConformance runs the uniq corpus against system uniq + bag.
 func TestUniqConformance(t *testing.T) {
+	skipUnlessGNUHost(t)
 	realBin := resolveTool(t, "BAG_REAL_UNIQ", "uniq")
 	bagBin := buildBagAs(t, "uniq")
 	Run(t, UniqCases(), realBin, bagBin)
@@ -164,6 +190,7 @@ func TestUniqConformance(t *testing.T) {
 
 // TestSortConformance runs the sort corpus against system sort + bag.
 func TestSortConformance(t *testing.T) {
+	skipUnlessGNUHost(t)
 	realBin := resolveTool(t, "BAG_REAL_SORT", "sort")
 	bagBin := buildBagAs(t, "sort")
 	Run(t, SortCases(), realBin, bagBin)
@@ -171,6 +198,7 @@ func TestSortConformance(t *testing.T) {
 
 // TestHexdumpConformance runs the hexdump corpus against system hexdump + bag.
 func TestHexdumpConformance(t *testing.T) {
+	skipUnlessGNUHost(t)
 	realBin := resolveTool(t, "BAG_REAL_HEXDUMP", "hexdump")
 	bagBin := buildBagAs(t, "hexdump")
 	Run(t, HexdumpCases(), realBin, bagBin)
@@ -180,6 +208,7 @@ func TestHexdumpConformance(t *testing.T) {
 // Outputs are sorted line-by-line because find's directory iteration
 // order isn't standardized.
 func TestFindConformance(t *testing.T) {
+	skipUnlessGNUHost(t)
 	realBin := resolveTool(t, "BAG_REAL_FIND", "find")
 	bagBin := buildBagAs(t, "find")
 	Run(t, FindCases(), realBin, bagBin)

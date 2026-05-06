@@ -25,6 +25,30 @@ jobs:
           CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o bag ./
           ./bag --list
 
+  # Native macOS runner. We don't run the cross-tool conformance corpus
+  # here — macOS ships BSD-flavored coreutils and bag targets GNU
+  # semantics, so a corpus diff would generate noise rather than signal.
+  # Each Test*Conformance bails out via skipUnlessGNUHost when GOOS isn't
+  # 'linux'. What we DO run is bag's own unit tests and the codec / tar /
+  # zip roundtrip tests, which exercise bag against whatever binaries
+  # the host ships (gzip and bzip2 are preinstalled on macos-latest;
+  # zstd / xz roundtrips skip if the binary isn't found).
+  mac-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+      - name: lint-no-unsafe (BSD grep)
+        run: make lint-no-unsafe
+      - name: Build static binary
+        run: |
+          CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o bag ./
+          ./bag --list
+
   conformance:
     runs-on: ubuntu-latest
     needs: test
