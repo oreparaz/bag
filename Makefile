@@ -36,8 +36,11 @@ vet:
 	$(GO) vet ./...
 
 .PHONY: lint-no-unsafe
+# Forbid imports of the unsafe or C packages, and cgo build directives.
+# Anchored regex so "cgo" / "unsafe" mentioned in prose comments doesn't
+# trip the check. Skip _test.go and vendor/.
 lint-no-unsafe:
-	@if grep -RIn --include='*.go' -E '"unsafe"|cgo' . | grep -v _test.go | grep -v vendor/ ; then \
+	@if grep -RIn --include='*.go' -E '^[[:space:]]*(_[[:space:]]+)?"unsafe"|^[[:space:]]*(_[[:space:]]+)?"C"|^//[[:space:]]*#cgo' . | grep -v _test.go | grep -v vendor/ ; then \
 		echo "FAIL: unsafe / cgo references found"; exit 1; \
 	else \
 		echo "OK: no unsafe / cgo"; \

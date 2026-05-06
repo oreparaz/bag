@@ -139,16 +139,23 @@ func extractOne(f *zip.File, o *unzipOptions) error {
 	if err := safefs.RefusePathTraversal(rel); err != nil {
 		return errors.New("refusing extraction outside output dir")
 	}
+	// The extraction root is o.dir (-d) or cwd. Components above the
+	// root may legitimately be symlinks (e.g. /var on macOS) and aren't
+	// attacker-controlled, so safefs only walks below root.
+	root := o.dir
+	if root == "" {
+		root = "."
+	}
 	target := rel
 	if o.dir != "" {
 		target = filepath.Join(o.dir, rel)
 	}
-	if err := safefs.EnsureNoSymlinkInPath(target); err != nil {
+	if err := safefs.EnsureNoSymlinkInPath(root, target); err != nil {
 		return err
 	}
 
 	if strings.HasSuffix(f.Name, "/") {
-		return safefs.MkdirAllNoSymlinkLeaf(target, f.Mode().Perm())
+		return safefs.MkdirAllNoSymlinkLeaf(root, target, f.Mode().Perm())
 	}
 
 	if o.pipe {
@@ -174,7 +181,7 @@ func extractOne(f *zip.File, o *unzipOptions) error {
 		}
 	}
 
-	if err := safefs.MkdirAllNoSymlinkLeaf(filepath.Dir(target), 0o755); err != nil {
+	if err := safefs.MkdirAllNoSymlinkLeaf(root, filepath.Dir(target), 0o755); err != nil {
 		return err
 	}
 	mode := f.Mode()

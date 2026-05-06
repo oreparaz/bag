@@ -247,16 +247,23 @@ func extractEntry(tr *tar.Reader, hdr *tar.Header, name string, o *options) erro
 	if err := safefs.RefusePathTraversal(name); err != nil {
 		return fmt.Errorf("refusing extraction outside output dir: %q", hdr.Name)
 	}
-	// Refuse to write through any pre-existing symlink in the path —
-	// closes the "extract symlink dir, then file through it" attack.
-	if err := safefs.EnsureNoSymlinkInPath(name); err != nil {
+	// The extraction root is cwd (-C dir was already applied via Chdir).
+	// We use "." rather than the absolute cwd so safefs's intermediate
+	// symlink check stays inside the user-chosen tree — components above
+	// cwd (e.g. /var on macOS, which is itself a system symlink) are
+	// outside the attacker's control and shouldn't fail the check.
+	const root = "."
+	// Refuse to write through any pre-existing symlink inside the
+	// extraction tree — closes the "extract symlink dir, then file
+	// through it" attack.
+	if err := safefs.EnsureNoSymlinkInPath(root, name); err != nil {
 		return err
 	}
 	switch hdr.Typeflag {
 	case tar.TypeDir:
-		return safefs.MkdirAllNoSymlinkLeaf(name, hdr.FileInfo().Mode().Perm())
+		return safefs.MkdirAllNoSymlinkLeaf(root, name, hdr.FileInfo().Mode().Perm())
 	case tar.TypeReg, tar.TypeRegA:
-		if err := safefs.MkdirAllNoSymlinkLeaf(filepath.Dir(name), 0o755); err != nil {
+		if err := safefs.MkdirAllNoSymlinkLeaf(root, filepath.Dir(name), 0o755); err != nil {
 			return err
 		}
 		// O_NOFOLLOW: refuse to overwrite a symlink leaf. O_TRUNC: allow
@@ -275,7 +282,7 @@ func extractEntry(tr *tar.Reader, hdr *tar.Header, name string, o *options) erro
 		}
 		return nil
 	case tar.TypeSymlink:
-		if err := safefs.MkdirAllNoSymlinkLeaf(filepath.Dir(name), 0o755); err != nil {
+		if err := safefs.MkdirAllNoSymlinkLeaf(root, filepath.Dir(name), 0o755); err != nil {
 			return err
 		}
 		// We don't validate hdr.Linkname here — symlink targets can legally
@@ -294,7 +301,7 @@ func extractEntry(tr *tar.Reader, hdr *tar.Header, name string, o *options) erro
 		if err := safefs.RefusePathTraversal(linkTarget); err != nil {
 			return fmt.Errorf("refusing hardlink to unsafe target %q", hdr.Linkname)
 		}
-		if err := safefs.MkdirAllNoSymlinkLeaf(filepath.Dir(name), 0o755); err != nil {
+		if err := safefs.MkdirAllNoSymlinkLeaf(root, filepath.Dir(name), 0o755); err != nil {
 			return err
 		}
 		_ = os.Remove(name)

@@ -52,36 +52,34 @@ func RefusePathTraversal(name string) error {
 // archive could have used it to redirect a sibling write.
 var ErrSymlinkInPath = errors.New("refusing to descend through symlink")
 
-// EnsureNoSymlinkInPath walks the directory components of target (relative
-// to cwd or absolute) and returns ErrSymlinkInPath if any existing
-// component is a symlink. Non-existent components are fine — they'll be
-// created.
+// EnsureNoSymlinkInPath walks the directory components of target between
+// root (exclusive) and target (exclusive of the leaf) and returns
+// ErrSymlinkInPath if any existing intermediate component is a symlink.
+// Non-existent components are fine — they'll be created.
+//
+// root is the user's extraction directory (or "." for cwd-relative
+// extracts). Components above root — for instance /var on macOS, where
+// /var is a system symlink to /private/var — are NOT checked, because
+// the user explicitly chose root and an attacker controls nothing
+// outside it.
 //
 // The leaf component is NOT checked here; use O_NOFOLLOW on the open to
 // guard the leaf.
-func EnsureNoSymlinkInPath(target string) error {
-	dir := filepath.Dir(target)
+func EnsureNoSymlinkInPath(root, target string) error {
+	rel, err := relativeWithin(root, target)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(rel)
 	if dir == "" || dir == "." {
 		return nil
 	}
-	clean := filepath.Clean(dir)
-	parts := strings.Split(clean, string(os.PathSeparator))
-	cur := ""
-	if filepath.IsAbs(clean) {
-		cur = "/"
-		parts = parts[1:]
-	}
-	for _, p := range parts {
+	cur := filepath.Clean(root)
+	for _, p := range strings.Split(dir, string(os.PathSeparator)) {
 		if p == "" || p == "." {
 			continue
 		}
-		if cur == "" {
-			cur = p
-		} else if cur == "/" {
-			cur = "/" + p
-		} else {
-			cur = cur + string(os.PathSeparator) + p
-		}
+		cur = filepath.Join(cur, p)
 		info, err := os.Lstat(cur)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -94,6 +92,34 @@ func EnsureNoSymlinkInPath(target string) error {
 		}
 	}
 	return nil
+}
+
+// relativeWithin returns target's path relative to root, with both
+// resolved to absolute paths first. Errors if target is outside root.
+func relativeWithin(root, target string) (string, error) {
+	rootAbs, err := absPath(root)
+	if err != nil {
+		return "", err
+	}
+	targetAbs, err := absPath(target)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(filepath.Clean(rootAbs), filepath.Clean(targetAbs))
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("target %q escapes root %q", target, root)
+	}
+	return rel, nil
+}
+
+func absPath(p string) (string, error) {
+	if filepath.IsAbs(p) {
+		return p, nil
+	}
+	return filepath.Abs(p)
 }
 
 // CreateExcl opens path for writing, creating it. Fails with EEXIST if the
@@ -111,10 +137,12 @@ func CreateTrunc(path string, perm os.FileMode) (*os.File, error) {
 	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, perm)
 }
 
-// MkdirAllNoSymlinkLeaf is os.MkdirAll, except that if the leaf component
-// already exists as a symlink, we refuse. (os.MkdirAll silently accepts
-// an existing symlink-to-directory which is a tar-slip vector.)
-func MkdirAllNoSymlinkLeaf(path string, perm os.FileMode) error {
+// MkdirAllNoSymlinkLeaf is os.MkdirAll, except that if the leaf
+// component already exists as a symlink we refuse, and intermediate
+// path components between root and path are walked for symlinks.
+// (os.MkdirAll silently accepts an existing symlink-to-directory
+// which is a tar-slip vector.)
+func MkdirAllNoSymlinkLeaf(root, path string, perm os.FileMode) error {
 	info, err := os.Lstat(path)
 	if err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
@@ -128,7 +156,7 @@ func MkdirAllNoSymlinkLeaf(path string, perm os.FileMode) error {
 	if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := EnsureNoSymlinkInPath(path); err != nil {
+	if err := EnsureNoSymlinkInPath(root, path); err != nil {
 		return err
 	}
 	return os.MkdirAll(path, perm)
