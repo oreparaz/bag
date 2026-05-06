@@ -27,6 +27,7 @@ import (
 	"github.com/oreparaz/bag/internal/hexdump"
 	"github.com/oreparaz/bag/internal/sed"
 	bagsort "github.com/oreparaz/bag/internal/sort"
+	bagssh "github.com/oreparaz/bag/internal/ssh"
 	"github.com/oreparaz/bag/internal/tail"
 	"github.com/oreparaz/bag/internal/tarcmd"
 	"github.com/oreparaz/bag/internal/tee"
@@ -58,6 +59,7 @@ func tools() []Tool {
 		{Name: "hexdump", Run: hexdump.Main, Help: "BSD hex dump"},
 		{Name: "sed", Run: sed.Main, Help: "stream editor (subset)"},
 		{Name: "sort", Run: bagsort.Main, Help: "sort lines"},
+		{Name: "ssh", Run: bagssh.Main, Help: "minimal SSH client"},
 		{Name: "tail", Run: tail.Main, Help: "last lines/bytes"},
 		{Name: "tar", Run: tarcmd.Main, Help: "tape archiver"},
 		{Name: "tee", Run: tee.Main, Help: "stdin to stdout + files"},

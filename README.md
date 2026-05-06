@@ -40,6 +40,7 @@ Why?
 | `uniq`     | usable | -c -d -u -i -f -s -w                                       |
 | `find`     | usable | -name/-iname/-path/-type/-size/-mtime/-prune/-exec/-delete |
 | `hexdump`  | usable | -C / -b / -c / -d / -o / -x; -n -s -v; squeeze with `*`    |
+| `ssh`      | usable | client only; pubkey + password auth, known_hosts TOFU      |
 
 See [FUTURE.md](FUTURE.md) for the wish list.
 
