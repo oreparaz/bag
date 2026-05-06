@@ -276,6 +276,90 @@ func TestExtraIgnoreFlag(t *testing.T) {
 	}
 }
 
+// TestColorAlwaysEmitsANSI: with --color=always we expect bold-green
+// filenames, bold-yellow line numbers, bold-red match highlights.
+func TestColorAlwaysEmitsANSI(t *testing.T) {
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"a.txt": "alpha beta\n",
+	})
+	_, out, _ := runAg(t, dir, "--color=always", "alpha")
+	for _, want := range []string{
+		"\x1b[1;32m",   // filename green
+		"\x1b[1;33m",   // line number yellow
+		"\x1b[1;31m",   // match red
+		"\x1b[0m",      // reset
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected escape %q in %q", want, out)
+		}
+	}
+}
+
+// TestColorAutoOffWhenPiped: stdout is captured (not a TTY), so auto
+// should produce no ANSI sequences.
+func TestColorAutoOffWhenPiped(t *testing.T) {
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"a.txt": "alpha\n",
+	})
+	_, out, _ := runAg(t, dir, "alpha")
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("auto color should be off off-TTY: %q", out)
+	}
+}
+
+// TestColorNeverOverridesAlways: '--color=never' wins.
+func TestColorNeverOverrides(t *testing.T) {
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"a.txt": "alpha\n",
+	})
+	_, out, _ := runAg(t, dir, "--color=never", "alpha")
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("--color=never should suppress: %q", out)
+	}
+}
+
+// TestNoColorEnv honors the NO_COLOR convention for auto mode.
+func TestNoColorEnv(t *testing.T) {
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"a.txt": "alpha\n",
+	})
+	t.Setenv("NO_COLOR", "1")
+	// --color=always still wins (explicit user choice).
+	_, out, _ := runAg(t, dir, "--color=always", "alpha")
+	if !strings.Contains(out, "\x1b[1;32m") {
+		t.Errorf("--color=always should win over NO_COLOR: %q", out)
+	}
+	// But auto should bow to NO_COLOR.
+	_, out, _ = runAg(t, dir, "alpha")
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("NO_COLOR should suppress auto color: %q", out)
+	}
+}
+
+// TestColorContextLinesNotHighlighted: context lines shouldn't have the
+// match highlight (they didn't match), only filename + line number get
+// tinted.
+func TestColorContextLinesNotHighlighted(t *testing.T) {
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"a.txt": "before\nMATCH\nafter\n",
+	})
+	_, out, _ := runAg(t, dir, "--color=always", "-C", "1", "MATCH")
+	// Match line has the red escape; context lines shouldn't.
+	if !strings.Contains(out, "\x1b[1;31mMATCH\x1b[0m") {
+		t.Errorf("expected MATCH to be highlighted: %q", out)
+	}
+	// Surrounding context lines should still be plain — search for
+	// 'before' followed by no escape before the line ends.
+	if strings.Contains(out, "\x1b[1;31mbefore") || strings.Contains(out, "\x1b[1;31mafter") {
+		t.Errorf("context lines should not be highlighted: %q", out)
+	}
+}
+
 func TestContext(t *testing.T) {
 	dir := t.TempDir()
 	writeTree(t, dir, map[string]string{

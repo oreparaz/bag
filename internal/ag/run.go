@@ -44,6 +44,8 @@ type options struct {
 	groupForce   *bool
 	patternFromE bool
 
+	color string // auto / always / never (default: auto)
+
 	printHelp    bool
 	printVersion bool
 }
@@ -96,11 +98,12 @@ func run(args []string) int {
 	}
 
 	state := &state{
-		out:     out,
-		opts:    o,
-		re:      re,
-		fileRE:  fileRE,
-		grouped: grouped,
+		out:      out,
+		opts:     o,
+		re:       re,
+		fileRE:   fileRE,
+		grouped:  grouped,
+		colorOn:  shouldColor(o),
 	}
 
 	for _, root := range roots {
@@ -114,16 +117,96 @@ func run(args []string) int {
 
 // state carries everything walkers / scanners need.
 type state struct {
-	out     *bufio.Writer
-	opts    *options
-	re      *regexp.Regexp
-	fileRE  *regexp.Regexp
-	grouped bool
+	out      *bufio.Writer
+	opts     *options
+	re       *regexp.Regexp
+	fileRE   *regexp.Regexp
+	grouped  bool
+	colorOn  bool
 
 	matched bool
 
 	// per-root .gitignore / .ignore patterns
 	rootIgnores []ignorePattern
+}
+
+// ANSI color sequences. Picked to feel like real ag and ripgrep:
+//
+//	filenames           : bold green
+//	line numbers        : bold yellow
+//	matched substrings  : bold red
+//	separator           : default (reset)
+const (
+	cReset    = "\x1b[0m"
+	cFilename = "\x1b[1;32m" // bold green
+	cLineNum  = "\x1b[1;33m" // bold yellow
+	cMatch    = "\x1b[1;31m" // bold red
+)
+
+// shouldColor decides whether to emit ANSI escapes. Honors the user's
+// explicit choice, the NO_COLOR convention, and TTY detection.
+func shouldColor(o *options) bool {
+	switch o.color {
+	case "always":
+		return true
+	case "never":
+		return false
+	}
+	// auto.
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	return isatty(os.Stdout)
+}
+
+// writeColored writes b wrapped in the given ANSI color when colors are
+// enabled. Otherwise it writes b plain.
+func (s *state) writeColored(color string, b []byte) {
+	if s.colorOn {
+		s.out.WriteString(color)
+		s.out.Write(b)
+		s.out.WriteString(cReset)
+	} else {
+		s.out.Write(b)
+	}
+}
+
+// writeHighlighted writes a matched line, wrapping every match span in
+// the match color. Bytes outside any match are emitted plain. With
+// color disabled, this is just a write.
+func (s *state) writeHighlighted(line []byte) {
+	if !s.colorOn {
+		s.out.Write(line)
+		return
+	}
+	// Strip the trailing newline before regex-matching so '$' anchors
+	// don't behave surprisingly.
+	hadNL := len(line) > 0 && line[len(line)-1] == '\n'
+	body := line
+	if hadNL {
+		body = line[:len(line)-1]
+	}
+	matches := s.re.FindAllIndex(body, -1)
+	last := 0
+	for _, m := range matches {
+		if m[0] < last {
+			// Should not happen with FindAllIndex; defensive.
+			continue
+		}
+		if m[0] > last {
+			s.out.Write(body[last:m[0]])
+		}
+		s.out.WriteString(cMatch)
+		s.out.Write(body[m[0]:m[1]])
+		s.out.WriteString(cReset)
+		last = m[1]
+	}
+	if last < len(body) {
+		s.out.Write(body[last:])
+	}
+	if hadNL {
+		s.out.WriteByte('\n')
+	}
 }
 
 func buildPattern(o *options) (*regexp.Regexp, error) {
@@ -280,7 +363,7 @@ func (s *state) scanReader(path string, r io.Reader) {
 
 	emit := func(num int, line []byte, sep byte) {
 		if emitFileHeaderIfFirst {
-			s.out.WriteString(path)
+			s.writeColored(cFilename, []byte(path))
 			s.out.WriteByte('\n')
 			emitFileHeaderIfFirst = false
 		}
@@ -290,13 +373,19 @@ func (s *state) scanReader(path string, r io.Reader) {
 				showFile = true
 			}
 			if showFile {
-				s.out.WriteString(path)
+				s.writeColored(cFilename, []byte(path))
 				s.out.WriteByte(':')
 			}
 		}
-		s.out.WriteString(strconv.Itoa(num))
+		s.writeColored(cLineNum, []byte(strconv.Itoa(num)))
 		s.out.WriteByte(sep)
-		s.out.Write(line)
+		// Match-highlight only on actual match lines (separator ':'),
+		// not context lines (separator '-').
+		if sep == ':' {
+			s.writeHighlighted(line)
+		} else {
+			s.out.Write(line)
+		}
 		if len(line) == 0 || line[len(line)-1] != '\n' {
 			s.out.WriteByte('\n')
 		}
@@ -349,14 +438,14 @@ func (s *state) scanReader(path string, r io.Reader) {
 
 	if s.opts.count && fileMatches > 0 {
 		if !s.opts.noFilename {
-			s.out.WriteString(path)
+			s.writeColored(cFilename, []byte(path))
 			s.out.WriteByte(':')
 		}
-		s.out.WriteString(strconv.FormatInt(fileMatches, 10))
+		s.writeColored(cLineNum, []byte(strconv.FormatInt(fileMatches, 10)))
 		s.out.WriteByte('\n')
 	}
 	if s.opts.listMatch && fileMatches > 0 {
-		s.out.WriteString(path)
+		s.writeColored(cFilename, []byte(path))
 		if s.opts.null {
 			s.out.WriteByte(0)
 		} else {
@@ -364,7 +453,7 @@ func (s *state) scanReader(path string, r io.Reader) {
 		}
 	}
 	if s.opts.listNoMatch && fileMatches == 0 {
-		s.out.WriteString(path)
+		s.writeColored(cFilename, []byte(path))
 		if s.opts.null {
 			s.out.WriteByte(0)
 		} else {
@@ -422,7 +511,7 @@ func parseArgs(args []string) (*options, error) {
 				i++
 				return args[i], nil
 			}
-			if err := applyLong(o, name, next); err != nil {
+			if err := applyLong(o, name, next, hasEq); err != nil {
 				return nil, err
 			}
 			i++
@@ -533,7 +622,7 @@ func pickArg(rest string, i *int, args []string) (string, bool) {
 	return args[*i], true
 }
 
-func applyLong(o *options, name string, next func() (string, error)) error {
+func applyLong(o *options, name string, next func() (string, error), hasEq bool) error {
 	switch name {
 	case "ignore-case":
 		o.ignoreCase = true
@@ -613,6 +702,30 @@ func applyLong(o *options, name string, next func() (string, error)) error {
 	case "nogroup":
 		no := false
 		o.groupForce = &no
+	case "color", "colour":
+		// `--color` alone means "always" per the de-facto convention.
+		// `--color=VAL` selects auto / always / never. We only consume
+		// the next argv when it was attached via '='.
+		v := "always"
+		if hasEq {
+			got, err := next()
+			if err != nil {
+				return err
+			}
+			v = got
+		}
+		switch strings.ToLower(v) {
+		case "always", "yes", "on":
+			o.color = "always"
+		case "never", "no", "off":
+			o.color = "never"
+		case "auto", "tty":
+			o.color = "auto"
+		default:
+			return fmt.Errorf("invalid --color=%q (auto, always, never)", v)
+		}
+	case "nocolor", "no-color":
+		o.color = "never"
 	case "help":
 		o.printHelp = true
 	case "version":
