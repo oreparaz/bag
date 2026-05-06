@@ -18,7 +18,7 @@ build:
 
 .PHONY: install-symlinks
 install-symlinks: build
-	@for tool in base64 bunzip2 bzcat bzip2 cat curl cut find grep gunzip gzip head hexdump sed sort tail tar tee uniq unxz unzip unzstd wc wget xz xzcat zcat zip zstd zstdcat; do \
+	@for tool in ag base64 bunzip2 bzcat bzip2 cat curl cut find grep gunzip gzip head hexdump sed sort tail tar tee uniq unxz unzip unzstd wc wget xz xzcat zcat zip zstd zstdcat; do \
 		ln -sf $(BINARY) $$tool; \
 		echo "linked $$tool -> $(BINARY)"; \
 	done
@@ -56,5 +56,5 @@ docker-test:
 
 .PHONY: clean
 clean:
-	rm -f $(BINARY) base64 bunzip2 bzcat bzip2 cat curl cut find grep gunzip gzip head hexdump sed sort tail tar tee uniq unxz unzip unzstd wc wget xz xzcat zcat zip zstd zstdcat
+	rm -f $(BINARY) ag base64 bunzip2 bzcat bzip2 cat curl cut find grep gunzip gzip head hexdump sed sort tail tar tee uniq unxz unzip unzstd wc wget xz xzcat zcat zip zstd zstdcat
 	rm -rf dist/

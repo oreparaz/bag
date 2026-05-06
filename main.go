@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/oreparaz/bag/internal/ag"
 	base64cmd "github.com/oreparaz/bag/internal/base64cmd"
 	"github.com/oreparaz/bag/internal/cat"
 	"github.com/oreparaz/bag/internal/cmpressor"
@@ -45,6 +46,7 @@ type Tool struct {
 
 func tools() []Tool {
 	all := []Tool{
+		{Name: "ag", Run: ag.Main, Help: "recursive code search (RE2)"},
 		{Name: "base64", Run: base64cmd.Main, Help: "encode/decode base64"},
 		{Name: "cat", Run: cat.Main, Help: "concatenate files"},
 		{Name: "curl", Run: curl.Main, Help: "transfer URLs"},

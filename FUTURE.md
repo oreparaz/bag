@@ -45,6 +45,16 @@ target:
 - `env`, `which`, `printenv`
 - `awk` subset
 
+## ag features intentionally deferred
+
+- `.gitignore` negation (`!pattern`) — v1 silently drops these
+- `**` deep-match globs in `.gitignore`
+- `.hgignore`, `.ignore` hierarchical (subdirectory-local) rules
+- File-type filters (`--cpp`, `--py`, `--list-file-types`)
+- Color output (we never colorize)
+- Parallelism — search is sequential
+- `--print0` filename separator on output bodies (only `-l` / `-L` supports `-0`)
+
 ## sed features intentionally deferred
 
 - `a` / `i` / `c` (append, insert, change)
