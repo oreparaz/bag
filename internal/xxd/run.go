@@ -388,13 +388,18 @@ func setCount(o *options, c byte, s string) error {
 	}
 	switch c {
 	case 'c':
-		if n < 0 || n > 256 {
-			return fmt.Errorf("invalid -c %d (must be 0..256)", n)
+		// Reject 0 explicitly: bag treats `o.cols == 0` as "use default",
+		// so accepting -c 0 silently would coerce the user's input back
+		// to 16 with no warning. (Real xxd's "all on one line" behaviour
+		// is on the FUTURE wishlist.)
+		if n <= 0 || n > 256 {
+			return fmt.Errorf("invalid -c %d (must be 1..256)", n)
 		}
 		o.cols = int(n)
 	case 'g':
-		if n < 0 {
-			return fmt.Errorf("invalid -g %d", n)
+		// Same reasoning as -c 0.
+		if n < 1 {
+			return fmt.Errorf("invalid -g %d (must be >= 1)", n)
 		}
 		o.groupSize = int(n)
 	case 's':

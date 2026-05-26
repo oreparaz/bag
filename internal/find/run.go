@@ -30,12 +30,32 @@ func run(args []string) int {
 
 	exit := 0
 	for _, root := range roots {
-		if err := walk(root, expr, hasAction); err != nil {
+		wc, err := walk2(root, expr, hasAction)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "find: %v\n", err)
+			exit = 1
+		}
+		if wc != nil && wc.hadActionErr {
 			exit = 1
 		}
 	}
 	return exit
+}
+
+// walk2 wraps walk and returns the populated walkCtx so callers can
+// observe action errors (e.g. -delete or -exec failures).
+func walk2(root string, expr *node, hasAction bool) (*walkCtx, error) {
+	wc := &walkCtx{
+		root:       root,
+		expr:       expr,
+		hasAction:  hasAction,
+		depthFirst: hasDeleteIn(expr),
+	}
+	rootInfo, err := os.Lstat(root)
+	if err != nil {
+		return wc, err
+	}
+	return wc, walkInner(wc, root, 0, rootInfo)
 }
 
 // walk drives a custom filesystem walk so we can honor -prune and
@@ -45,24 +65,14 @@ func run(args []string) int {
 // (children before parents) so that emptying a directory before
 // removing it actually works. GNU find implies -depth with -delete.
 type walkCtx struct {
-	root      string
-	expr      *node
-	hasAction bool
+	root       string
+	expr       *node
+	hasAction  bool
 	depthFirst bool
-}
-
-func walk(root string, expr *node, hasAction bool) error {
-	wc := &walkCtx{
-		root:       root,
-		expr:       expr,
-		hasAction:  hasAction,
-		depthFirst: hasDeleteIn(expr),
-	}
-	rootInfo, err := os.Lstat(root)
-	if err != nil {
-		return err
-	}
-	return walkInner(wc, root, 0, rootInfo)
+	// hadActionErr is set when a -delete or -exec action fails. It does
+	// not abort the walk (matching GNU find), but it forces a non-zero
+	// process exit so scripts can detect failures.
+	hadActionErr bool
 }
 
 func hasDeleteIn(n *node) bool {
@@ -83,7 +93,7 @@ func walkInner(wc *walkCtx, p string, depth int, info os.FileInfo) error {
 }
 
 func walkPreOrder(wc *walkCtx, p string, depth int, info os.FileInfo) error {
-	ent := entry{path: p, info: info, depth: depth}
+	ent := entry{path: p, info: info, depth: depth, wc: wc}
 
 	matched, prune := evalExpr(wc.expr, &ent)
 	if matched && !wc.hasAction && !ent.printed {
@@ -123,7 +133,7 @@ func walkDepthFirst(wc *walkCtx, p string, depth int, info os.FileInfo) error {
 			}
 		}
 	}
-	ent := entry{path: p, info: info, depth: depth}
+	ent := entry{path: p, info: info, depth: depth, wc: wc}
 	matched, _ := evalExpr(wc.expr, &ent)
 	if matched && !wc.hasAction && !ent.printed {
 		fmt.Println(p)
@@ -163,7 +173,8 @@ type entry struct {
 	path    string
 	info    os.FileInfo
 	depth   int
-	printed bool // set by -print action so default-print isn't doubled
+	printed bool      // set by -print action so default-print isn't doubled
+	wc      *walkCtx  // back-pointer so actions can record errors
 }
 
 // node is the parsed expression AST.
@@ -184,8 +195,9 @@ type node struct {
 }
 
 type timeBucket struct {
-	op rune  // '+', '-', '='
-	n  int64 // days
+	op   rune  // '+', '-', '='
+	n    int64 // value (days for time, units for size)
+	unit int64 // for -size: bytes per unit. 0 means already in bytes.
 }
 
 // evalExpr returns (matched, prune). prune is set when -prune fires for
@@ -251,23 +263,28 @@ func evalExpr(n *node, e *entry) (matched, prune bool) {
 		fmt.Print(e.path + "\x00")
 		e.printed = true
 		return true, false
+	case "printf":
+		fmt.Print(formatPrintf(n.str, e))
+		e.printed = true
+		return true, false
 	case "delete":
-		// Refuse "." and absolute roots as a safety guardrail.
 		// GNU find requires -depth with -delete; we silently set it.
-		var err error
-		if e.info.IsDir() {
-			err = os.Remove(e.path)
-		} else {
-			err = os.Remove(e.path)
-		}
+		err := os.Remove(e.path)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "find: %s: %v\n", e.path, err)
+			if e.wc != nil {
+				e.wc.hadActionErr = true
+			}
 			return false, false
 		}
 		e.printed = true // suppresses default print
 		return true, false
 	case "exec":
-		return runExec(n.args, e.path), false
+		ok := runExec(n.args, e.path)
+		if !ok && e.wc != nil {
+			e.wc.hadActionErr = true
+		}
+		return ok, false
 	}
 	return true, false
 }
@@ -294,13 +311,21 @@ func matchType(info os.FileInfo, t string) bool {
 }
 
 func matchSize(size int64, t timeBucket, _ string) bool {
+	// GNU find rounds size *up* to the next unit before comparing, so
+	// `-size 1k` matches files of 1..1024 bytes (not just exactly 1024).
+	got := size
+	want := t.n
+	if t.unit > 0 {
+		got = (size + t.unit - 1) / t.unit
+		want = t.n / t.unit
+	}
 	switch t.op {
 	case '+':
-		return size > t.n
+		return got > want
 	case '-':
-		return size < t.n
+		return got < want
 	}
-	return size == t.n
+	return got == want
 }
 
 func matchTime(mtime time.Time, t timeBucket) bool {
@@ -327,7 +352,158 @@ func isEmpty(e *entry) bool {
 		}
 		return err != nil
 	}
+	// GNU find -empty matches only regular files and directories. A
+	// 0-length pipe / socket / device / symlink-to-"" should not match.
+	if !e.info.Mode().IsRegular() {
+		return false
+	}
 	return e.info.Size() == 0
+}
+
+// formatPrintf renders a -printf format string against the current
+// entry. Implements the format specifiers and escapes that show up in
+// the kernel's build scripts and other common usages:
+//
+//	%p  full pathname
+//	%P  pathname relative to the start point (root stripped)
+//	%f  basename
+//	%h  leading directories of %p
+//	%H  the starting-point under which the file was found
+//	%s  size in bytes
+//	%m  permission bits as octal (no leading zeros)
+//	%M  symbolic file mode (e.g. "drwxr-xr-x") — best effort
+//	%y  type letter (f, d, l, p, c, b, s)
+//	%TY %Tm %Td  mtime year/month/day, %T@ epoch seconds
+//	%%  literal percent
+//	\n \t \0 \\  escape sequences
+//
+// Unrecognised %X is preserved verbatim so we don't lose data.
+func formatPrintf(fmtstr string, e *entry) string {
+	var b strings.Builder
+	for i := 0; i < len(fmtstr); i++ {
+		c := fmtstr[i]
+		if c == '\\' && i+1 < len(fmtstr) {
+			switch fmtstr[i+1] {
+			case 'n':
+				b.WriteByte('\n')
+			case 't':
+				b.WriteByte('\t')
+			case '0':
+				b.WriteByte(0)
+			case '\\':
+				b.WriteByte('\\')
+			default:
+				b.WriteByte(fmtstr[i+1])
+			}
+			i++
+			continue
+		}
+		if c != '%' {
+			b.WriteByte(c)
+			continue
+		}
+		if i+1 >= len(fmtstr) {
+			b.WriteByte('%')
+			continue
+		}
+		switch fmtstr[i+1] {
+		case '%':
+			b.WriteByte('%')
+			i++
+		case 'p':
+			b.WriteString(e.path)
+			i++
+		case 'P':
+			rel := e.path
+			if e.wc != nil {
+				root := e.wc.root
+				if strings.HasPrefix(rel, root) {
+					rel = strings.TrimPrefix(rel, root)
+					rel = strings.TrimPrefix(rel, "/")
+				}
+			}
+			b.WriteString(rel)
+			i++
+		case 'f':
+			b.WriteString(filepath.Base(e.path))
+			i++
+		case 'h':
+			b.WriteString(filepath.Dir(e.path))
+			i++
+		case 'H':
+			if e.wc != nil {
+				b.WriteString(e.wc.root)
+			} else {
+				b.WriteString(e.path)
+			}
+			i++
+		case 's':
+			fmt.Fprintf(&b, "%d", e.info.Size())
+			i++
+		case 'm':
+			fmt.Fprintf(&b, "%o", e.info.Mode().Perm())
+			i++
+		case 'M':
+			b.WriteString(e.info.Mode().String())
+			i++
+		case 'y':
+			b.WriteByte(typeLetter(e.info.Mode()))
+			i++
+		case 'T':
+			// Two-char specifier: %Tc.
+			if i+2 < len(fmtstr) {
+				b.WriteString(formatTime(e.info.ModTime(), fmtstr[i+2]))
+				i += 2
+			} else {
+				b.WriteByte('%')
+			}
+		default:
+			b.WriteByte('%')
+			b.WriteByte(fmtstr[i+1])
+			i++
+		}
+	}
+	return b.String()
+}
+
+func typeLetter(m os.FileMode) byte {
+	switch {
+	case m.IsRegular():
+		return 'f'
+	case m.IsDir():
+		return 'd'
+	case m&os.ModeSymlink != 0:
+		return 'l'
+	case m&os.ModeNamedPipe != 0:
+		return 'p'
+	case m&os.ModeCharDevice != 0:
+		return 'c'
+	case m&os.ModeDevice != 0:
+		return 'b'
+	case m&os.ModeSocket != 0:
+		return 's'
+	}
+	return '?'
+}
+
+func formatTime(t time.Time, spec byte) string {
+	switch spec {
+	case '@':
+		return strconv.FormatInt(t.Unix(), 10)
+	case 'Y':
+		return fmt.Sprintf("%04d", t.Year())
+	case 'm':
+		return fmt.Sprintf("%02d", int(t.Month()))
+	case 'd':
+		return fmt.Sprintf("%02d", t.Day())
+	case 'H':
+		return fmt.Sprintf("%02d", t.Hour())
+	case 'M':
+		return fmt.Sprintf("%02d", t.Minute())
+	case 'S':
+		return fmt.Sprintf("%02d", t.Second())
+	}
+	return string(spec)
 }
 
 func runExec(args []string, path string) bool {
@@ -544,6 +720,8 @@ func (p *parser) parsePred() (*node, error) {
 		return &node{op: "print"}, nil
 	case "-print0":
 		return &node{op: "print0"}, nil
+	case "-printf":
+		return &node{op: "printf", str: p.eat()}, nil
 	case "-delete":
 		return &node{op: "delete"}, nil
 	case "-exec":
@@ -602,7 +780,7 @@ func parseSizeArg(s string) (timeBucket, error) {
 	if err != nil {
 		return timeBucket{}, err
 	}
-	return timeBucket{op: rune(op), n: n * mult}, nil
+	return timeBucket{op: rune(op), n: n * mult, unit: mult}, nil
 }
 
 func parseTimeArg(s string) (timeBucket, error) {

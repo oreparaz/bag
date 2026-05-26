@@ -455,12 +455,14 @@ With no FILE, or when FILE is -, read standard input.
                              output starting with byte NUM of each file
   -n, --lines=[+]NUM       output the last NUM lines, instead of the last 10;
                              or use -n +NUM to output starting with line NUM
+  -f, --follow             output appended data as the file grows
+  -F                       same as --follow plus retry on missing files
+      --pid=PID            with -f, terminate after process PID dies
+  -s, --sleep-interval=N   with -f, poll every N seconds (default 0.2)
   -q, --quiet, --silent    never output headers giving file names
   -v, --verbose            always output headers giving file names
       --help               display this help and exit
       --version            output version information and exit
-
-Note: --follow / -f is intentionally not supported by this tool.
 `
 	io.WriteString(w, help)
 }

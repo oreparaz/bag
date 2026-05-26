@@ -197,22 +197,31 @@ func doCompress(t Tool, o *options, in string) error {
 	if err != nil {
 		return err
 	}
-	// outCloser closes the output; we also need to close the compressor.
+	// On any error after this point, remove the partial output file so
+	// subsequent runs without -f don't fail with "exists" (matches gzip's
+	// behaviour of cleaning up on signal/error).
+	cleanup := func(e error) error {
+		outCloser()
+		if outPath != "" && !o.stdout {
+			_ = os.Remove(outPath)
+		}
+		return e
+	}
 	w, err := compress.NewWriter(t.Format, out, o.level)
 	if err != nil {
-		outCloser()
-		return err
+		return cleanup(err)
 	}
 	if _, err := io.Copy(w, src); err != nil {
 		w.Close()
-		outCloser()
-		return err
+		return cleanup(err)
 	}
 	if err := w.Close(); err != nil {
-		outCloser()
-		return err
+		return cleanup(err)
 	}
 	if err := outCloser(); err != nil {
+		if outPath != "" && !o.stdout {
+			_ = os.Remove(outPath)
+		}
 		return err
 	}
 
@@ -248,8 +257,24 @@ func doDecompress(t Tool, o *options, in string) error {
 	if err != nil {
 		return err
 	}
-	defer outCloser()
+	cleanup := func(e error) error {
+		outCloser()
+		if outPath != "" && !o.stdout {
+			_ = os.Remove(outPath)
+		}
+		return e
+	}
 	if _, err := io.Copy(out, r); err != nil {
+		return cleanup(err)
+	}
+	// Don't defer the close: we need to know the close error before
+	// removing the input. A delayed-allocation filesystem (NFS, btrfs)
+	// may surface ENOSPC at close time, and removing the input on a
+	// "successful" copy would destroy the only good copy of the data.
+	if err := outCloser(); err != nil {
+		if outPath != "" && !o.stdout {
+			_ = os.Remove(outPath)
+		}
 		return err
 	}
 

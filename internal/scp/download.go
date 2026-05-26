@@ -148,18 +148,16 @@ func receiveTree(r *bufio.Reader, w io.Writer, root string, o *options) error {
 				target = root
 			}
 			if first == 'C' {
-				if err := receiveFile(r, w, target, mode, size, pendingTimes); err != nil {
+				if err := receiveFile(r, w, root, target, mode, size, pendingTimes); err != nil {
 					return err
 				}
 				pendingTimes = timesPair{}
 				continue
 			}
 			// Directory entry — meaningful for recursive transfers.
-			parent := root
-			if len(stack) > 0 {
-				parent = stack[len(stack)-1]
-			}
-			if err := safefs.MkdirAllNoSymlinkLeaf(parent, target, os.FileMode(mode)); err != nil {
+			// Pass dstRoot (the original destination) as the safefs root
+			// so EnsureNoSymlinkInPath actually walks the full path.
+			if err := safefs.MkdirAllNoSymlinkLeaf(root, target, os.FileMode(mode&0o777)); err != nil {
 				return err
 			}
 			stack = append(stack, target)
@@ -214,6 +212,14 @@ func parseEntryHeader(line string) (mode int, size int64, name string, err error
 	if perr != nil {
 		return 0, 0, "", fmt.Errorf("scp: bad size %q", parts[1])
 	}
+	if s < 0 {
+		return 0, 0, "", fmt.Errorf("scp: negative size %q", parts[1])
+	}
+	// The SCP wire protocol requires a single path component; multi-segment
+	// names would let the server bypass per-D-record symlink checks.
+	if strings.ContainsAny(parts[2], `/\`) {
+		return 0, 0, "", fmt.Errorf("scp: refusing multi-segment entry name %q", parts[2])
+	}
 	if err := safefs.RefusePathTraversal(parts[2]); err != nil {
 		return 0, 0, "", fmt.Errorf("scp: refusing entry %q", parts[2])
 	}
@@ -234,12 +240,16 @@ func parseTimes(line string) (timesPair, error) {
 
 // receiveFile reads size bytes into target, then expects a NUL ack.
 // The destination directory must already exist.
-func receiveFile(r *bufio.Reader, w io.Writer, target string, mode int, size int64, t timesPair) error {
+func receiveFile(r *bufio.Reader, w io.Writer, root, target string, mode int, size int64, t timesPair) error {
 	parent := filepath.Dir(target)
-	if err := os.MkdirAll(parent, 0o755); err != nil {
+	// Use safefs's symlink-aware MkdirAll so a D-record can't have planted
+	// a symlink in the destination tree; pass dstRoot as the safefs root
+	// so EnsureNoSymlinkInPath walks the full path.
+	if err := safefs.MkdirAllNoSymlinkLeaf(root, parent, 0o755); err != nil {
 		return err
 	}
-	out, err := safefs.CreateTrunc(target, os.FileMode(mode))
+	// Strip suid/sgid/sticky bits — never honor those from a remote.
+	out, err := safefs.CreateTrunc(target, os.FileMode(mode&0o777))
 	if err != nil {
 		return err
 	}

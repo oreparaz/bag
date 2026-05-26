@@ -125,6 +125,11 @@ func compressorTools() []Tool {
 }
 
 func main() {
+	// Restore default SIGPIPE handling so streaming tools (cat/head/tail/
+	// grep/...) terminate cleanly when their stdout pipe is closed by
+	// a downstream consumer, instead of Go's default of printing
+	// "signal: broken pipe" and exiting 1.
+	resetSIGPIPE()
 	os.Exit(dispatch(os.Args))
 }
 
@@ -140,11 +145,17 @@ func dispatch(argv []string) int {
 	}
 
 	base := filepath.Base(argv[0])
+	// On Windows the binary is suffixed with .exe; strip it so a
+	// `curl.exe` symlink/copy still dispatches to the curl tool.
+	base = strings.TrimSuffix(base, ".exe")
+	base = strings.TrimSuffix(base, ".EXE")
 	// Strip a "bag-" prefix (some packagers ship binaries that way).
 	base = strings.TrimPrefix(base, "bag-")
-
-	if t, ok := byName[base]; ok {
-		return t.Run(argv[1:])
+	// Don't treat an empty post-strip base as a lookup key.
+	if base != "" {
+		if t, ok := byName[base]; ok {
+			return t.Run(argv[1:])
+		}
 	}
 
 	if len(argv) >= 2 {

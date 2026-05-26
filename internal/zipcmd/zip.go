@@ -51,34 +51,48 @@ func runZip(args []string) int {
 		return 1
 	}
 	zw := zip.NewWriter(out.w)
-	defer func() {
-		zw.Close()
-		out.close()
-	}()
+
+	closeAll := func(prevErr error) error {
+		err := prevErr
+		// zip.Writer.Close() writes the central directory; failure here means
+		// the archive is unreadable, so it must be surfaced.
+		if cerr := zw.Close(); err == nil {
+			err = cerr
+		}
+		if cerr := out.close(); err == nil {
+			err = cerr
+		}
+		return err
+	}
 
 	for _, root := range o.files {
 		if err := addPath(zw, root, o); err != nil {
+			closeAll(err)
 			fmt.Fprintf(os.Stderr, "zip: %v\n", err)
 			return 1
 		}
+	}
+	if err := closeAll(nil); err != nil {
+		fmt.Fprintf(os.Stderr, "zip: %v\n", err)
+		return 1
 	}
 	return 0
 }
 
 type zipOut struct {
 	w     io.Writer
-	close func()
+	close func() error
 }
 
 func openZipOutput(path string) (zipOut, error) {
 	if path == "-" {
-		return zipOut{w: os.Stdout, close: func() {}}, nil
+		return zipOut{w: os.Stdout, close: func() error { return nil }}, nil
 	}
 	f, err := os.Create(path)
 	if err != nil {
 		return zipOut{}, err
 	}
-	return zipOut{w: f, close: func() { f.Close() }}, nil
+	return zipOut{w: f, close: f.Close}, nil
 }
 
 func addPath(zw *zip.Writer, root string, o *zipOptions) error {

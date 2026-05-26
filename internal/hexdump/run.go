@@ -367,6 +367,9 @@ func parseArgs(args []string) (*options, error) {
 				if err != nil {
 					return nil, err
 				}
+				if v < 0 {
+					return nil, fmt.Errorf("hexdump: -n %d: negative count", v)
+				}
 				o.limit = v
 				j = len(a)
 			case 's':
@@ -377,6 +380,9 @@ func parseArgs(args []string) (*options, error) {
 				v, err := strconv.ParseInt(arg, 0, 64)
 				if err != nil {
 					return nil, err
+				}
+				if v < 0 {
+					return nil, fmt.Errorf("hexdump: -s %d: negative seek", v)
 				}
 				o.skip = v
 				j = len(a)

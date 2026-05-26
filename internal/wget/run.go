@@ -98,6 +98,7 @@ func newApp(o *options) (*app, error) {
 		Insecure:       o.NoCheckCert,
 		ConnectTimeout: chooseTimeout(o.ConnectTimeout, o.Timeout),
 		Proxy:          o.Proxy,
+		NoProxyEnv:     o.NoProxy,
 		IPFamily:       ipFamily(o),
 		CACertFile:     o.CACertFile,
 	})
@@ -110,6 +111,14 @@ func newApp(o *options) (*app, error) {
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= o.MaxRedirect {
 				return fmt.Errorf("%d redirects exceeded", o.MaxRedirect)
+			}
+			// Strip credentials when the redirect crosses to a different
+			// host. This prevents a malicious server returning Location:
+			// https://attacker/ from harvesting our --user/--password
+			// (set as Authorization) or any --header=Cookie value.
+			if len(via) > 0 && req.URL.Host != via[0].URL.Host {
+				req.Header.Del("Authorization")
+				req.Header.Del("Cookie")
 			}
 			return nil
 		},
@@ -196,10 +205,21 @@ func (a *app) doOnce(target *url.URL, outPath string, useStdout bool) (int, bool
 	ctx, cancel := requestContext(a.opts.Timeout, a.opts.ReadTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", target.String(), nil)
+	method := a.opts.Method
+	if method == "" {
+		method = "GET"
+	}
+	var body io.Reader
+	if a.opts.PostDataSet {
+		body = strings.NewReader(a.opts.PostData)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, target.String(), body)
 	if err != nil {
 		fmt.Fprintf(a.logW, "wget: %v\n", err)
 		return exitGeneric, false
+	}
+	if a.opts.PostDataSet && req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 
 	setWgetDefaults(req, a.opts)

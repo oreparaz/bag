@@ -55,13 +55,27 @@ func TestAlternateDelimiter(t *testing.T) {
 }
 
 func TestBackreference(t *testing.T) {
-	_, out := runSed(t, []byte("alice 30\n"), `s/(\w+) (\d+)/$2 $1/`)
-	// We use POSIX-ish numbers; Go regexp ReplaceAllString uses $1 etc.
+	// sed's replacement syntax is \1..\9 and &, not Go's $1.
+	// Default mode is BRE: groups are \(...\) and (...) is literal.
+	// First-match path, BRE:
+	_, out := runSed(t, []byte("alice 30\n"), `s/\(\w\+\) \(\d\+\)/\2 \1/`)
 	if out != "30 alice\n" {
-		// some sed dialects use \1; accept either
-		if out != "alice 30\n" {
-			t.Errorf("got %q", out)
-		}
+		t.Errorf("BRE first-match: got %q", out)
+	}
+	// First-match path, ERE (with -E): parens are unescaped.
+	_, out = runSed(t, []byte("alice 30\n"), "-E", `s/(\w+) (\d+)/\2 \1/`)
+	if out != "30 alice\n" {
+		t.Errorf("ERE first-match: got %q", out)
+	}
+	// & expands to the whole match:
+	_, out = runSed(t, []byte("foo bar\n"), `s/bar/[&]/`)
+	if out != "foo [bar]\n" {
+		t.Errorf("ampersand: got %q", out)
+	}
+	// /g path uses the same expander:
+	_, out = runSed(t, []byte("a1 b2\n"), "-E", `s/(\w)(\d)/\2\1/g`)
+	if out != "1a 2b\n" {
+		t.Errorf("global: got %q", out)
 	}
 }
 
@@ -176,8 +190,41 @@ func TestInPlacePreservesMode(t *testing.T) {
 	}
 }
 
+func TestYTransliterate(t *testing.T) {
+	// y is now supported — it transliterates each char in src to the
+	// corresponding char in dst.
+	_, out := runSed(t, []byte("hello\n"), "y/abcdefghijklmnopqrstuvwxyz/ABCDEFGHIJKLMNOPQRSTUVWXYZ/")
+	if out != "HELLO\n" {
+		t.Errorf("got %q", out)
+	}
+}
+
+// Regression for the kernel-build asm-offsets script: default sed mode
+// is BRE (\( \) are groups), `s` delimiter survives inside [[:space:]],
+// blocks `/RE/{cmd1;cmd2;...}` work, and -n + s///p only prints when a
+// substitution actually happened.
+func TestKernelAsmOffsets(t *testing.T) {
+	in := "->FOO #42 sizeof(foo)\n->BAR #44 sizeof(bar)\n"
+	script := `s:^[[:space:]]*\.ascii[[:space:]]*"\(.*\)".*:\1:; /^->/{s:->#\(.*\):/* \1 */:; s:^->\([^ ]*\) [\$#]*\([^ ]*\) \(.*\):#define \1 \2 /* \3 */:; s:->::; p;}`
+	_, out := runSed(t, []byte(in), "-n", script)
+	want := "#define FOO 42 /* sizeof(foo) */\n#define BAR 44 /* sizeof(bar) */\n"
+	if out != want {
+		t.Errorf("got:\n%s\nwant:\n%s", out, want)
+	}
+}
+
+func TestSubstNFlagOnlyPrintsMatches(t *testing.T) {
+	// `sed -n s/a/A/p` should print only lines where a substitution
+	// actually happened — not every line.
+	_, out := runSed(t, []byte("alpha\nbeta\ngamma\n"), "-n", "s/a/A/p")
+	want := "Alpha\nbetA\ngAmma\n"
+	if out != want {
+		t.Errorf("got %q want %q", out, want)
+	}
+}
+
 func TestUnsupportedCommand(t *testing.T) {
-	exit, _ := runSed(t, []byte("a\n"), "y/a/b/")
+	exit, _ := runSed(t, []byte("a\n"), "Q") // capital Q isn't implemented
 	if exit == 0 {
 		t.Errorf("expected non-zero on unsupported command")
 	}

@@ -97,6 +97,15 @@ func emit(w *bufio.Writer, name string, o *options) error {
 
 func emitLines(w *bufio.Writer, r io.Reader, count int64) error {
 	br := bufio.NewReader(r)
+	// "-0" is encoded as int64Min and means "all but the last 0 lines"
+	// — i.e., print everything.
+	if count == int64Min {
+		_, err := io.Copy(w, br)
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return err
+	}
 	if count >= 0 {
 		// First N lines: count newlines.
 		var n int64
@@ -143,6 +152,14 @@ func emitLines(w *bufio.Writer, r io.Reader, count int64) error {
 }
 
 func emitBytes(w *bufio.Writer, r io.Reader, count int64) error {
+	// "-0" — all but the last 0 bytes — means everything.
+	if count == int64Min {
+		_, err := io.Copy(w, r)
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return err
+	}
 	if count >= 0 {
 		_, err := io.CopyN(w, r, count)
 		if errors.Is(err, io.EOF) {
@@ -339,6 +356,19 @@ func parseCount(s string) (int64, error) {
 	if s == "" {
 		return 0, errors.New("empty count")
 	}
+	// Detect a leading sign explicitly. ParseInt collapses "-0" to 0,
+	// losing the user's intent ("all but last 0 lines" — which means
+	// print everything — vs "first 0 lines" which means print nothing).
+	negative := false
+	if s[0] == '-' {
+		negative = true
+		s = s[1:]
+		if s == "" {
+			return 0, errors.New("empty count")
+		}
+	} else if s[0] == '+' {
+		s = s[1:]
+	}
 	mult := int64(1)
 	last := s[len(s)-1]
 	switch last {
@@ -355,12 +385,31 @@ func parseCount(s string) (int64, error) {
 		mult = 1 << 30
 		s = s[:len(s)-1]
 	}
-	n, err := strconv.ParseInt(s, 10, 64)
+	n, err := strconv.ParseUint(s, 10, 63)
 	if err != nil {
 		return 0, fmt.Errorf("invalid count: %v", err)
 	}
-	return n * mult, nil
+	// Range-check the multiplication so absurdly large input doesn't wrap.
+	if mult != 1 && n > uint64(int64Max)/uint64(mult) {
+		return 0, fmt.Errorf("count overflow: %s", s)
+	}
+	v := int64(n) * mult
+	if negative {
+		// Sentinel: encode "-0" as math.MinInt64 so the caller can tell
+		// it apart from positive 0. emit functions check for negative
+		// counts and clamp.
+		if v == 0 {
+			return int64Min, nil
+		}
+		v = -v
+	}
+	return v, nil
 }
+
+const (
+	int64Max = int64(^uint64(0) >> 1) // math.MaxInt64
+	int64Min = -int64Max - 1          // math.MinInt64
+)
 
 func printHelp(w io.Writer) {
 	const help = `Usage: head [OPTION]... [FILE]...

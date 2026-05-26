@@ -24,9 +24,11 @@ func (a *app) buildClient() *http.Client {
 		Insecure:       a.opts.Insecure,
 		ConnectTimeout: a.opts.ConnectTimeout,
 		Proxy:          a.opts.Proxy,
-		IPFamily:       ipFamily(a.opts),
-		HTTPVersion:    a.opts.HTTPVersion,
-		CACertFile:     a.opts.CACertFile,
+		// curl --noproxy '*' bypasses every host: also skip env lookup.
+		NoProxyEnv:  a.opts.Proxy == "" && a.opts.NoProxy == "*",
+		IPFamily:    ipFamily(a.opts),
+		HTTPVersion: a.opts.HTTPVersion,
+		CACertFile:  a.opts.CACertFile,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "curl: %v\n", err)
@@ -42,12 +44,27 @@ func (a *app) buildClient() *http.Client {
 			if a.opts.MaxRedirs >= 0 && len(via) >= a.opts.MaxRedirs {
 				return tooManyRedirects{N: a.opts.MaxRedirs}
 			}
+			// Capture Set-Cookie from the redirect response so flows like
+			// "POST /login → 302 + Set-Cookie: session → GET /home" carry
+			// the session forward.
+			if req.Response != nil {
+				a.jar.StoreFromResponse(req.Response)
+			}
 			// curl strips Authorization on cross-host redirects; net/http
 			// already does this for the Authorization header it set itself,
 			// but we set headers manually so do it explicitly.
 			if len(via) > 0 && req.URL.Host != via[0].URL.Host {
 				req.Header.Del("Authorization")
 				req.Header.Del("Cookie")
+			}
+			// Re-apply jar cookies for the new request URL.
+			if c := a.jar.HeaderFor(req.URL); c != "" {
+				existing := req.Header.Get("Cookie")
+				if existing != "" {
+					req.Header.Set("Cookie", existing+"; "+c)
+				} else {
+					req.Header.Set("Cookie", c)
+				}
 			}
 			return nil
 		},
@@ -98,7 +115,12 @@ func (a *app) outputForIndex(i int, target *url.URL) (string, bool) {
 
 // openOutput returns a writer and a close function. For stdout, the close
 // is a no-op. For files, it creates parent dirs if --create-dirs.
-func (a *app) openOutput(path string, stdout bool, _ *http.Response) (writer, func(), error) {
+//
+// Resume / Continue mode (-C / -C -) only switches to append when the
+// server actually honored our Range request with 206 Partial Content. If
+// the server returned 200 OK (full body), we truncate so we don't end up
+// with previous-partial + full duplicated on disk.
+func (a *app) openOutput(path string, stdout bool, resp *http.Response) (writer, func(), error) {
 	if stdout {
 		return a.stdout, func() {}, nil
 	}
@@ -108,7 +130,7 @@ func (a *app) openOutput(path string, stdout bool, _ *http.Response) (writer, fu
 		}
 	}
 	flag := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
-	if a.opts.Continue != 0 || a.opts.ContinueAuto {
+	if (a.opts.Continue != 0 || a.opts.ContinueAuto) && resp != nil && resp.StatusCode == http.StatusPartialContent {
 		flag = os.O_WRONLY | os.O_APPEND
 		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 			flag = os.O_WRONLY | os.O_CREATE

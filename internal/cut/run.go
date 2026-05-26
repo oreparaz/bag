@@ -113,8 +113,10 @@ func emitLine(body string, o *options) (string, bool) {
 	switch o.mode {
 	case modeFields:
 		return emitFields(body, o)
-	case modeChars, modeBytes:
+	case modeBytes:
 		return emitBytes(body, o), true
+	case modeChars:
+		return emitChars(body, o), true
 	}
 	return "", false
 }
@@ -143,6 +145,21 @@ func emitBytes(body string, o *options) string {
 	for _, i := range idx {
 		if i >= 0 && i < len(body) {
 			b.WriteByte(body[i])
+		}
+	}
+	return b.String()
+}
+
+// emitChars selects by Unicode code-point index (cut -c). For ASCII this
+// is the same as byte indexing; for multi-byte input the GNU semantics
+// is character-aware.
+func emitChars(body string, o *options) string {
+	runes := []rune(body)
+	idx := selectIndices(len(runes), o.list, o.complement)
+	var b strings.Builder
+	for _, i := range idx {
+		if i >= 0 && i < len(runes) {
+			b.WriteRune(runes[i])
 		}
 	}
 	return b.String()
@@ -300,6 +317,9 @@ func parseArgs(args []string) (*options, error) {
 				if !ok {
 					return nil, errors.New("-d requires an argument")
 				}
+				if arg == "" {
+					return nil, errors.New("-d requires a non-empty delimiter")
+				}
 				o.delim = arg
 				j = len(a)
 			case 's':
@@ -356,6 +376,9 @@ func applyLong(o *options, name string, next func() (string, error)) error {
 		v, err := next()
 		if err != nil {
 			return err
+		}
+		if v == "" {
+			return errors.New("--delimiter requires a non-empty argument")
 		}
 		o.delim = v
 	case "output-delimiter":

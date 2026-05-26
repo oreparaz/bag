@@ -51,6 +51,14 @@ func loadAuthMethods(o Options) ([]ssh.AuthMethod, error) {
 }
 
 func loadSigner(path string) (ssh.Signer, error) {
+	// OpenSSH refuses keys with permissions wider than 0600 to avoid
+	// silent credential theft when the key file is accidentally world-
+	// or group-readable. Mirror that check.
+	if fi, err := os.Stat(path); err == nil && fi.Mode().IsRegular() {
+		if fi.Mode().Perm()&0o077 != 0 {
+			return nil, fmt.Errorf("permissions %#o for %q are too open; protect the key with 0600", fi.Mode().Perm(), path)
+		}
+	}
 	pem, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

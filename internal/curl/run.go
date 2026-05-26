@@ -1,11 +1,13 @@
 package curl
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -54,7 +56,15 @@ func newApp(o *options) *app {
 	a := &app{opts: o, stdout: os.Stdout, stderr: os.Stderr}
 	a.jar = newCookieJar()
 	if o.CookieIn != "" {
-		_ = a.jar.LoadInput(o.CookieIn)
+		// Scope inline -b cookies to the first URL's host so a redirect
+		// to an attacker-controlled host doesn't receive them.
+		var origin *url.URL
+		if len(o.URLs) > 0 {
+			if u, err := normalizeURL(o.URLs[0]); err == nil {
+				origin = u
+			}
+		}
+		_ = a.jar.LoadInput(o.CookieIn, origin)
 	}
 	a.client = a.buildClient()
 	return a
@@ -86,6 +96,18 @@ func (a *app) transferOne(idx int, raw string) int {
 		return exitReadError
 	}
 
+	// Snapshot the body bytes so retries can re-send it. Without this the
+	// reader is drained by attempt 1 and retry attempts silently send an
+	// empty body.
+	var bodyBytes []byte
+	if body != nil {
+		bodyBytes, err = io.ReadAll(body)
+		if err != nil {
+			fmt.Fprintf(a.stderr, "curl: %v\n", err)
+			return exitReadError
+		}
+	}
+
 	// -G turns -d into query string.
 	if a.opts.Get && len(a.opts.Data) > 0 {
 		qs, err := buildQueryFromData(a.opts.Data)
@@ -98,15 +120,35 @@ func (a *app) transferOne(idx int, raw string) int {
 		} else {
 			target.RawQuery += "&" + qs
 		}
-		body = nil
+		bodyBytes = nil
 		contentType = ""
 		method = "GET"
 	}
+	_ = body // body is replaced per-attempt below
 
-	if a.opts.HeadOnly {
+	if a.opts.HeadOnly && method == "" {
 		method = "HEAD"
 		// curl -I: implicit -i.
 		a.opts.IncludeHeaders = true
+	} else if a.opts.HeadOnly {
+		// -I implies -i (header dump) even when -X overrides the method.
+		a.opts.IncludeHeaders = true
+	}
+
+	// Compute resume offset for -C / -C -. With -C - we read the existing
+	// output file's size; with -C N we use the literal byte offset. The
+	// offset becomes a Range header so the server only sends bytes >= off,
+	// instead of the previous behaviour where O_APPEND silently turned the
+	// full response into duplicate data on disk.
+	var resumeOffset int64
+	if (a.opts.Continue != 0 || a.opts.ContinueAuto) && !isStdout {
+		if a.opts.ContinueAuto {
+			if fi, err := os.Stat(outPath); err == nil {
+				resumeOffset = fi.Size()
+			}
+		} else {
+			resumeOffset = a.opts.Continue
+		}
 	}
 
 	url := target.String()
@@ -133,7 +175,11 @@ func (a *app) transferOne(idx int, raw string) int {
 			}
 		}
 		ctx, cancel := requestContext(a.opts.MaxTime)
-		code, retry := a.doOnce(ctx, method, url, body, contentType, outPath, isStdout)
+		var attemptBody io.Reader
+		if bodyBytes != nil {
+			attemptBody = bytes.NewReader(bodyBytes)
+		}
+		code, retry := a.doOnce(ctx, method, url, attemptBody, contentType, outPath, isStdout, resumeOffset)
 		cancel()
 		lastCode = code
 		if !retry {
@@ -146,11 +192,14 @@ func (a *app) transferOne(idx int, raw string) int {
 // doOnce performs a single attempt (no retry, but redirects handled by
 // the http.Client). Returns the curl exit code and whether the failure
 // is retryable per --retry semantics.
-func (a *app) doOnce(ctx context.Context, method, url string, body io.Reader, ct, outPath string, isStdout bool) (int, bool) {
+func (a *app) doOnce(ctx context.Context, method, url string, body io.Reader, ct, outPath string, isStdout bool, resumeOffset int64) (int, bool) {
 	req, err := buildRequest(ctx, method, url, body, ct, a.opts, a.jar)
 	if err != nil {
 		fmt.Fprintf(a.stderr, "curl: %v\n", err)
 		return exitFailedInit, false
+	}
+	if resumeOffset > 0 && req.Header.Get("Range") == "" {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", resumeOffset))
 	}
 
 	if a.opts.Verbose {

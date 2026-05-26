@@ -116,47 +116,113 @@ func count(name string) (counts, error) {
 
 	br := bufio.NewReaderSize(r, 64*1024)
 	inWord := false
-	var lineLen int64
+	var col int64 // current display column for -L
 
+	// residual holds the trailing partial-rune bytes from the previous
+	// Read so a multi-byte rune that straddles a 32 KiB boundary isn't
+	// counted as multiple invalid runes (or tab-expanded twice).
+	var residual []byte
 	buf := make([]byte, 32*1024)
 	for {
 		n, err := br.Read(buf)
 		if n > 0 {
 			c.bytes_ += int64(n)
-			if utf8Locale {
-				c.chars += int64(utf8.RuneCount(buf[:n]))
-			} else {
-				// Under the C / POSIX locale, GNU wc treats -m the same as -c.
-				c.chars += int64(n)
+			data := buf[:n]
+			if len(residual) > 0 {
+				data = append(residual, data...)
+				residual = nil
 			}
-			for _, b := range buf[:n] {
-				if b == '\n' {
-					c.lines++
-					if lineLen > c.maxLine {
-						c.maxLine = lineLen
+			// Find the boundary up to which we have complete runes only.
+			end := len(data)
+			if utf8Locale && err == nil {
+				// Walk back from the end past at most 3 bytes to find a
+				// valid rune start. If the trailing bytes form an
+				// incomplete rune, save them for the next iteration.
+				for back := 0; back < 4 && back < len(data); back++ {
+					i := len(data) - 1 - back
+					if utf8.RuneStart(data[i]) {
+						if utf8.FullRune(data[i:]) {
+							break
+						}
+						end = i
+						residual = append(residual[:0], data[i:]...)
+						break
 					}
-					lineLen = 0
-				} else {
-					lineLen++
 				}
-				if isWS(b) {
-					inWord = false
-				} else if !inWord {
-					inWord = true
-					c.words++
+			}
+			if utf8Locale {
+				c.chars += int64(utf8.RuneCount(data[:end]))
+				// Walk runes for column / word tracking.
+				i := 0
+				for i < end {
+					r, size := utf8.DecodeRune(data[i:])
+					if r == '\n' {
+						c.lines++
+						if col > c.maxLine {
+							c.maxLine = col
+						}
+						col = 0
+					} else if r == '\t' {
+						// Round up to the next multiple of 8.
+						col = ((col / 8) + 1) * 8
+					} else {
+						col++
+					}
+					if isWSRune(r) {
+						inWord = false
+					} else if !inWord {
+						inWord = true
+						c.words++
+					}
+					i += size
+				}
+			} else {
+				// Under C / POSIX locale, GNU wc treats -m the same as -c.
+				c.chars += int64(end)
+				for _, b := range data[:end] {
+					if b == '\n' {
+						c.lines++
+						if col > c.maxLine {
+							c.maxLine = col
+						}
+						col = 0
+					} else if b == '\t' {
+						col = ((col / 8) + 1) * 8
+					} else {
+						col++
+					}
+					if isWS(b) {
+						inWord = false
+					} else if !inWord {
+						inWord = true
+						c.words++
+					}
 				}
 			}
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				if lineLen > c.maxLine {
-					c.maxLine = lineLen
+				// Treat any leftover residual as bytes for char count.
+				if len(residual) > 0 {
+					c.chars += int64(len(residual))
+					residual = nil
+				}
+				if col > c.maxLine {
+					c.maxLine = col
 				}
 				return c, nil
 			}
 			return c, err
 		}
 	}
+}
+
+func isWSRune(r rune) bool {
+	switch r {
+	case ' ', '\t', '\n', '\r', '\v', '\f':
+		return true
+	}
+	return false
 }
 
 // isUTF8Locale reports whether the active LC_ALL / LC_CTYPE / LANG selects

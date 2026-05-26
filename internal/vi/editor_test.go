@@ -185,6 +185,38 @@ func TestDD2dd(t *testing.T) {
 	}
 }
 
+func TestDeleteWordAtEOLDoesNotEatNextLine(t *testing.T) {
+	// Pre-fix `dw` on the last word of a line in a multi-line buffer
+	// followed `moveWordForward` onto the next line and the operator
+	// then deleted both whole lines. After fix, only the last word of
+	// the current line is removed.
+	e := NewEditor()
+	mustOpen(t, e, "abc\ndef\n")
+	send(t, e, "dw")
+	if strings.Join(e.Lines(), "|") != "|def" {
+		t.Errorf("got %v", e.Lines())
+	}
+}
+
+func TestChangeLineCC(t *testing.T) {
+	// cc on the first line must not panic and must clear that line and
+	// drop into insert mode so subsequent text replaces it.
+	e := NewEditor()
+	mustOpen(t, e, "alpha\nbeta\n")
+	send(t, e, "ccX")
+	if strings.Join(e.Lines(), "|") != "X|beta" {
+		t.Errorf("got %v", e.Lines())
+	}
+
+	// And cc on a non-first line.
+	e = NewEditor()
+	mustOpen(t, e, "alpha\nbeta\ngamma\n")
+	send(t, e, "jccY")
+	if strings.Join(e.Lines(), "|") != "alpha|Y|gamma" {
+		t.Errorf("got %v", e.Lines())
+	}
+}
+
 func TestYankAndPaste(t *testing.T) {
 	e := NewEditor()
 	mustOpen(t, e, "alpha\nbeta\n")

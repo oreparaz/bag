@@ -53,6 +53,15 @@ func TestCharacters(t *testing.T) {
 	}
 }
 
+func TestCharactersUTF8(t *testing.T) {
+	// "héllo" is 5 codepoints (h, é, l, l, o) but 6 bytes. -c 1-3 must
+	// yield "hél", not the bytes h + 0xC3 + 0xA9 (broken UTF-8).
+	_, out := runCut(t, []byte("héllo\n"), "-c", "1-3")
+	if out != "hél\n" {
+		t.Errorf("got %q, want %q", out, "hél\n")
+	}
+}
+
 func TestComplement(t *testing.T) {
 	_, out := runCut(t, []byte("abcdef\n"), "-c", "2-4", "--complement")
 	if out != "aef\n" {

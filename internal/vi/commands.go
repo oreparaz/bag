@@ -487,8 +487,6 @@ func (e *Editor) applyOperator(op byte, motion rune, count int) error {
 			e.pushUndo()
 			text := e.buf.Line(e.row)
 			e.registers[0] = register{text: text, isLine: false}
-			e.buf.SetLines(replaceTwoLines(e.buf.Lines(), e.row-1, "")) // placeholder
-			// Simpler: empty the line in place.
 			ls := e.buf.Lines()
 			ls[e.row] = ""
 			e.buf.SetLines(ls)
@@ -526,6 +524,16 @@ func (e *Editor) applyOperator(op byte, motion rune, count int) error {
 		}
 	}
 	endRow, endCol := e.row, e.col
+	// For word motions ('w', 'e', 'b'), vim's operator-pending mode
+	// stops at end-of-line rather than descending into the next line.
+	// Without this clamp `dw` at end-of-line in a multi-line buffer
+	// would treat the range as multi-line and delete the next whole
+	// line.
+	if (motion == 'w' || motion == 'e' || motion == 'b') && endRow != startRow {
+		endRow = startRow
+		endCol = len(e.buf.Line(startRow))
+		e.row, e.col = endRow, endCol
+	}
 	// Restore cursor for "yank" semantics; "delete"/"change" keep end.
 	if startRow == endRow {
 		lo, hi := startCol, endCol

@@ -673,3 +673,20 @@ func runEvilServer(ln net.Listener, host xssh.Signer, authPub xssh.PublicKey) {
 		return
 	}
 }
+
+func TestParseEntryHeaderRejectsMultiSegment(t *testing.T) {
+	if _, _, _, err := parseEntryHeader("0644 4 foo/bar"); err == nil {
+		t.Errorf("expected refusal of name with /")
+	}
+	if _, _, _, err := parseEntryHeader("0644 4 foo\\bar"); err == nil {
+		t.Errorf("expected refusal of name with \\")
+	}
+	if _, _, _, err := parseEntryHeader("0644 -1 evil"); err == nil {
+		t.Errorf("expected refusal of negative size")
+	}
+	// Sanity: a clean name still parses.
+	mode, size, name, err := parseEntryHeader("0644 4 ok.txt")
+	if err != nil || mode != 0o644 || size != 4 || name != "ok.txt" {
+		t.Errorf("clean header rejected: mode=%o size=%d name=%q err=%v", mode, size, name, err)
+	}
+}

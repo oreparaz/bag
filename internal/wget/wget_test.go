@@ -46,6 +46,33 @@ func runWget(t *testing.T, args ...string) (int, []byte, []byte, string) {
 	return exit, out, se, dir
 }
 
+func TestPostData(t *testing.T) {
+	srv := mustStart(t)
+	exit, out, _, _ := runWget(t, "-q", "-O", "-",
+		"--post-data=user=alice&pw=secret",
+		srv.HTTP.URL+"/echo")
+	if exit != 0 {
+		t.Fatalf("exit=%d", exit)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("json: %v out=%q", err, out)
+	}
+	if got["method"] != "POST" {
+		t.Errorf("method=%v, want POST", got["method"])
+	}
+	if got["body"] != "user=alice&pw=secret" {
+		t.Errorf("body=%v, want post-data verbatim", got["body"])
+	}
+	// And the secret must not have been smuggled into a header.
+	headersAny, _ := got["headers"].(map[string]any)
+	for name := range headersAny {
+		if strings.Contains(strings.ToLower(name), "wget-postdata") {
+			t.Errorf("post-data leaked into header %q", name)
+		}
+	}
+}
+
 func TestSimpleGet(t *testing.T) {
 	srv := mustStart(t)
 	exit, _, _, dir := runWget(t, "-q", srv.HTTP.URL+"/ok")

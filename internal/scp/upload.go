@@ -91,6 +91,12 @@ func buildRemoteCmd(mode string, o *options) string {
 
 func targetPath(o *options, mode string) string {
 	if mode == "-t" {
+		// `host:` (no path) means "the user's home directory", which
+		// every other scp implementation expresses as ".". Sending an
+		// empty path makes the remote scp -t error out.
+		if o.dst.path == "" {
+			return "."
+		}
 		return o.dst.path
 	}
 	// -f: there's only one source for now (multi-source download is
@@ -121,6 +127,15 @@ func uploadOne(localPath string, w io.Writer, r *bufio.Reader, o *options) error
 		info, err = os.Stat(localPath)
 		if err != nil {
 			return err
+		}
+		// A symlink-to-directory must recurse; otherwise we'd send an
+		// empty C-record claiming the symlink target's size and silently
+		// drop the directory contents.
+		if info.IsDir() {
+			if !o.recursive {
+				return fmt.Errorf("%s: is a directory (symlink target; use -r)", localPath)
+			}
+			return uploadDir(localPath, info, w, r, o)
 		}
 	}
 	return uploadFile(localPath, info, w, r, o)
@@ -162,21 +177,40 @@ func uploadFile(path string, info os.FileInfo, w io.Writer, r *bufio.Reader, o *
 			return err
 		}
 	}
+	// Reject filenames the SCP wire protocol cannot represent. A file
+	// containing \n / \r / NUL would split the C-record across lines and
+	// the next file's record could be parsed as data on the receiving
+	// side, leaving an attacker-controlled file on the remote.
+	base := filepath.Base(path)
+	if strings.ContainsAny(base, "\n\r\x00") {
+		return fmt.Errorf("scp: refusing filename with newline or NUL: %q", base)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	mode := info.Mode().Perm()
-	size := info.Size()
-	if _, err := fmt.Fprintf(w, "C%04o %d %s\n", mode, size, filepath.Base(path)); err != nil {
+	// Re-stat the open file descriptor instead of trusting the prior
+	// Lstat result. Otherwise a race between Lstat and Open lets the file
+	// shrink/grow between the size we advertise in the C-record and the
+	// bytes we actually send, desyncing the protocol.
+	fi, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	mode := fi.Mode().Perm()
+	size := fi.Size()
+	if _, err := fmt.Fprintf(w, "C%04o %d %s\n", mode, size, base); err != nil {
 		return err
 	}
 	if err := readAck(r); err != nil {
 		return err
 	}
-	if _, err := io.Copy(w, f); err != nil {
+	// CopyN guarantees we write exactly `size` bytes regardless of any
+	// post-stat changes; a short read is reported as an error rather
+	// than silently sending less.
+	if _, err := io.CopyN(w, f, size); err != nil {
 		return err
 	}
 	// End-of-file marker.

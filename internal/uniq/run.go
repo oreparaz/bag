@@ -46,6 +46,10 @@ func run(args []string) int {
 		return 1
 	}
 
+	if len(o.files) > 2 {
+		fmt.Fprintf(os.Stderr, "uniq: extra operand %q\n", o.files[2])
+		return 1
+	}
 	in := os.Stdin
 	out := os.Stdout
 	if len(o.files) >= 1 && o.files[0] != "-" {

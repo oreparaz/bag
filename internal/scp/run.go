@@ -53,21 +53,42 @@ func (e endpoint) String() string {
 // parseEndpoint splits arg into endpoint pieces. Heuristic for "is this
 // remote?": presence of a colon, with the part before the colon NOT
 // containing a slash (so /a:b stays local). Matches scp's behavior.
+//
+// IPv6 literals are written as `[host]:path` (or `user@[host]:path`); the
+// brackets disambiguate the colons in the address from the colon that
+// separates host from path.
 func parseEndpoint(arg string) endpoint {
-	colon := strings.IndexByte(arg, ':')
-	if colon < 0 {
+	user := ""
+	rest := arg
+	if at := strings.IndexByte(rest, '@'); at >= 0 {
+		// Be careful: an '@' could appear inside a path. Treat it as the
+		// user separator only when no slash precedes it.
+		if !strings.ContainsAny(rest[:at], "/\\") {
+			user = rest[:at]
+			rest = rest[at+1:]
+		}
+	}
+	if strings.HasPrefix(rest, "[") {
+		// [ipv6]:path form.
+		end := strings.IndexByte(rest, ']')
+		if end > 0 && end+1 < len(rest) && rest[end+1] == ':' {
+			host := rest[1:end]
+			path := rest[end+2:]
+			return endpoint{user: user, host: host, path: path}
+		}
+		// Bracket without proper closing → treat as local path.
 		return endpoint{path: arg}
 	}
-	hostPart := arg[:colon]
+	colon := strings.IndexByte(rest, ':')
+	if colon < 0 {
+		// No colon → local path; user@... without colon is also local.
+		return endpoint{path: arg}
+	}
+	hostPart := rest[:colon]
 	if strings.ContainsAny(hostPart, "/\\") {
 		return endpoint{path: arg}
 	}
-	pathPart := arg[colon+1:]
-	user := ""
-	if at := strings.IndexByte(hostPart, '@'); at >= 0 {
-		user = hostPart[:at]
-		hostPart = hostPart[at+1:]
-	}
+	pathPart := rest[colon+1:]
 	return endpoint{user: user, host: hostPart, path: pathPart}
 }
 

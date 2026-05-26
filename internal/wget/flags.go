@@ -45,6 +45,11 @@ type options struct {
 	IPv4Only         bool
 	IPv6Only         bool
 	Proxy            string
+	NoProxy          bool // --proxy=off / --proxy=no
+
+	Method   string // --method
+	PostData string // --post-data
+	PostDataSet bool
 
 	printHelp    bool
 	printVersion bool
@@ -286,6 +291,16 @@ func applyLong(o *options, name string, next func() (string, error)) error {
 		o.NonVerbose = false
 	case "no-verbose":
 		o.NonVerbose = true
+	case "show-progress", "no-show-progress":
+		// Boolean — we have no progress bar but real wget scripts pass
+		// these routinely; accept-and-ignore rather than failing the run.
+	case "progress":
+		// --progress=bar / --progress=dot — has a value. Only consume
+		// the value when one was explicitly attached with `=`; otherwise
+		// don't steal the URL from the argv tail.
+		// (`next()` only consumes the next arg when hasEq is false; so
+		// we call it without preserving the value to advance i.)
+		_, _ = next()
 	case "tries":
 		v, err := next()
 		if err != nil {
@@ -444,6 +459,7 @@ func applyLong(o *options, name string, next func() (string, error)) error {
 		}
 		if v == "off" || v == "no" {
 			o.Proxy = ""
+			o.NoProxy = true
 		}
 	case "execute":
 		_, err := next()
@@ -483,8 +499,17 @@ func applyLong(o *options, name string, next func() (string, error)) error {
 		if err != nil {
 			return err
 		}
-		o.Headers = append(o.Headers, "X-Wget-PostData: "+v)
-		// We'll handle real POST only if the user opts in via --method POST.
+		o.PostData = v
+		o.PostDataSet = true
+		if o.Method == "" {
+			o.Method = "POST"
+		}
+	case "method":
+		v, err := next()
+		if err != nil {
+			return err
+		}
+		o.Method = strings.ToUpper(v)
 	default:
 		return fmt.Errorf("unknown option --%s", name)
 	}

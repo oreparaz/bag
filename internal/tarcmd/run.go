@@ -93,35 +93,49 @@ func doCreate(o *options) error {
 	if err != nil {
 		return err
 	}
-	defer closer()
-
+	// On any error path we still try to close everything, but we report
+	// the first error. On the success path we close in order — tar trailer,
+	// compression trailer, output file — and surface any failure so a
+	// truncated archive doesn't get reported as success (e.g. ENOSPC at
+	// trailer-flush time).
 	cw, err := compress.NewWriter(o.format, out, 0)
 	if err != nil {
+		closer()
 		return err
 	}
 	tw := tar.NewWriter(cw)
-	defer func() {
-		tw.Close()
-		cw.Close()
-	}()
+
+	closeAll := func(prevErr error) error {
+		err := prevErr
+		if cerr := tw.Close(); err == nil {
+			err = cerr
+		}
+		if cerr := cw.Close(); err == nil {
+			err = cerr
+		}
+		if cerr := closer(); err == nil {
+			err = cerr
+		}
+		return err
+	}
 
 	if o.chdir != "" {
 		old, err := os.Getwd()
 		if err != nil {
-			return err
+			return closeAll(err)
 		}
 		if err := os.Chdir(o.chdir); err != nil {
-			return err
+			return closeAll(err)
 		}
 		defer os.Chdir(old)
 	}
 
 	for _, root := range o.files {
 		if err := walkAndAdd(tw, root, o); err != nil {
-			return err
+			return closeAll(err)
 		}
 	}
-	return nil
+	return closeAll(nil)
 }
 
 func walkAndAdd(tw *tar.Writer, root string, o *options) error {
@@ -276,6 +290,15 @@ func extractEntry(tr *tar.Reader, hdr *tar.Header, name string, o *options) erro
 			f.Close()
 			return err
 		}
+		// CreateTrunc's mode argument is masked by the process umask. With
+		// -p the user wants the recorded permissions verbatim, so chmod
+		// after creation to bypass umask.
+		if o.preserve {
+			if err := f.Chmod(hdr.FileInfo().Mode().Perm()); err != nil {
+				f.Close()
+				return err
+			}
+		}
 		f.Close()
 		if o.preserve {
 			return os.Chtimes(name, time.Now(), hdr.ModTime)
@@ -350,24 +373,41 @@ func openIn(name string) (io.Reader, func(), error) {
 	return f, func() { f.Close() }, nil
 }
 
-func openOut(name string) (io.Writer, func(), error) {
+func openOut(name string) (io.Writer, func() error, error) {
 	if name == "" || name == "-" {
-		return os.Stdout, func() {}, nil
+		return os.Stdout, func() error { return nil }, nil
 	}
 	f, err := os.Create(name)
 	if err != nil {
 		return nil, nil, err
 	}
-	return f, func() { f.Close() }, nil
+	return f, f.Close, nil
 }
 
+// isExcluded reports whether name matches any exclude pattern. GNU tar
+// applies an exclude pattern to the full member name AND to every suffix
+// starting after each '/'. So `--exclude=*.tmp` against `src/skip.tmp`
+// matches via the post-slash suffix `skip.tmp`.
 func isExcluded(name string, patterns []string) bool {
+	slashName := filepath.ToSlash(name)
 	for _, p := range patterns {
-		if ok, _ := filepath.Match(p, filepath.Base(name)); ok {
+		if ok, _ := filepath.Match(p, slashName); ok {
 			return true
 		}
-		if ok, _ := filepath.Match(p, name); ok {
-			return true
+		// Try every '/'-suffix.
+		s := slashName
+		for {
+			i := strings.IndexByte(s, '/')
+			if i < 0 {
+				break
+			}
+			s = s[i+1:]
+			if s == "" {
+				break
+			}
+			if ok, _ := filepath.Match(p, s); ok {
+				return true
+			}
 		}
 	}
 	return false

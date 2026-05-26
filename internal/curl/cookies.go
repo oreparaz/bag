@@ -19,9 +19,18 @@ type cookieJar struct {
 func newCookieJar() *cookieJar { return &cookieJar{} }
 
 // LoadInput accepts either inline pairs ("k=v; k2=v2") or a file path.
-func (j *cookieJar) LoadInput(input string) error {
+//
+// When origin is non-nil, inline cookies are scoped to its host so they
+// don't leak across cross-host redirects (real curl scopes them to the
+// originally targeted host). origin == nil keeps the legacy "match any
+// host" behaviour for callers that have no URL context.
+func (j *cookieJar) LoadInput(input string, origin *url.URL) error {
 	if looksLikeCookieFile(input) {
 		return j.LoadFile(input)
+	}
+	scope := ""
+	if origin != nil {
+		scope = origin.Hostname()
 	}
 	parts := strings.Split(input, ";")
 	for _, p := range parts {
@@ -30,7 +39,7 @@ func (j *cookieJar) LoadInput(input string) error {
 		if eq < 0 {
 			continue
 		}
-		c := http.Cookie{Name: p[:eq], Value: p[eq+1:]}
+		c := http.Cookie{Name: p[:eq], Value: p[eq+1:], Domain: scope}
 		if !cookieFieldsSafe(c) {
 			continue // silently drop malformed pairs
 		}

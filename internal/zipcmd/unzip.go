@@ -190,10 +190,17 @@ func extractOne(f *zip.File, o *unzipOptions) error {
 		if err != nil {
 			return err
 		}
-		body, err := io.ReadAll(rc)
+		// Cap symlink target reads at PATH_MAX-ish. A hostile zip can
+		// otherwise declare a multi-GB symlink target and OOM bag during
+		// extraction.
+		const maxSymlinkTarget = 4096
+		body, err := io.ReadAll(io.LimitReader(rc, maxSymlinkTarget+1))
 		rc.Close()
 		if err != nil {
 			return err
+		}
+		if len(body) > maxSymlinkTarget {
+			return fmt.Errorf("unzip: symlink target too long for %q", f.Name)
 		}
 		_ = os.Remove(target)
 		return os.Symlink(string(body), target)

@@ -126,14 +126,15 @@ func run(args []string) int {
 }
 
 func buildPattern(o *options) (*regexp.Regexp, error) {
+	if len(o.patterns) == 0 {
+		return nil, errors.New("no pattern")
+	}
 	parts := make([]string, 0, len(o.patterns))
 	for _, p := range o.patterns {
 		// Each -e may itself contain newlines; treat each line as an
-		// alternative (matches GNU grep semantics).
+		// alternative (matches GNU grep semantics). An empty alternative
+		// is preserved — GNU grep matches every line when given `""`.
 		for _, line := range strings.Split(p, "\n") {
-			if line == "" {
-				continue
-			}
 			esc := line
 			if o.fixed {
 				esc = regexp.QuoteMeta(line)
@@ -148,7 +149,7 @@ func buildPattern(o *options) (*regexp.Regexp, error) {
 		}
 	}
 	if len(parts) == 0 {
-		return nil, errors.New("empty pattern")
+		return nil, errors.New("no pattern")
 	}
 	final := "(?:" + strings.Join(parts, ")|(?:") + ")"
 	if o.ignoreCase {
@@ -287,6 +288,17 @@ func scan(out *bufio.Writer, label string, r io.Reader, re *regexp.Regexp, o *op
 				matched = true
 				matches++
 				if !o.count && !o.listMatch && !o.listNoMatch && !o.quiet {
+					// Emit GNU-style "--" separator between non-overlapping
+					// context groups. The next group starts either at the
+					// oldest pre-context line in the ring (if any), or at
+					// the match itself when before-context is 0.
+					nextStart := lineNo
+					if o.before > 0 && len(ring) > 0 && ring[0].num > lastEmitted {
+						nextStart = ring[0].num
+					}
+					if (o.before > 0 || o.after > 0) && lastEmitted > 0 && nextStart > lastEmitted+1 {
+						out.WriteString("--\n")
+					}
 					if o.before > 0 {
 						for _, ri := range ring {
 							if ri.num <= lastEmitted {

@@ -30,22 +30,25 @@ type tracked struct {
 // stdin ("-") is followed via a blocking io.Copy — pipes never go away the
 // way regular files do.
 func followAll(w io.Writer, files []string, opts *options, printHeaders bool) int {
-	tracks := make([]*tracked, 0, len(files))
-	currentHead := -1
+	// Stdin in follow mode is a single-source stream; mixing it with
+	// regular files would require goroutines per source and isn't a
+	// supported real-tail combination either. Refuse rather than
+	// silently drop the other arguments.
 	for _, path := range files {
-		t := &tracked{path: path}
 		if path == "-" {
-			// Stdin: just stream forever.
-			if printHeaders {
-				if currentHead >= 0 {
-					fmt.Fprintln(w)
-				}
-				fmt.Fprintf(w, "==> %s <==\n", displayName(path))
-				currentHead = len(tracks)
+			if len(files) > 1 {
+				fmt.Fprintln(os.Stderr, "tail: cannot follow '-' alongside regular files")
+				return 1
 			}
 			_, _ = io.Copy(w, os.Stdin)
 			return 0
 		}
+	}
+
+	tracks := make([]*tracked, 0, len(files))
+	currentHead := -1
+	for _, path := range files {
+		t := &tracked{path: path}
 		f, err := os.Open(path)
 		if err != nil {
 			if !opts.followRetry {

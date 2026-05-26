@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	stdsort "sort"
 	"strconv"
 	"strings"
@@ -90,20 +91,56 @@ func run(args []string) int {
 	}
 
 	out := os.Stdout
-	if o.output != "" {
-		f, err := os.Create(o.output)
-		if err != nil {
+	if o.output == "" {
+		bw := bufio.NewWriter(out)
+		defer bw.Flush()
+		for _, l := range lines {
+			bw.WriteString(l)
+			bw.WriteByte('\n')
+		}
+		return 0
+	}
+
+	// -o output: write to a tempfile in the same directory and rename on
+	// success. Without this a write error mid-flight (ENOSPC, broken FS)
+	// would leave a half-sorted file in place of the original.
+	dir := filepath.Dir(o.output)
+	tmp, err := os.CreateTemp(dir, ".sort-out-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sort: %s: %v\n", o.output, err)
+		return 2
+	}
+	tmpPath := tmp.Name()
+	bw := bufio.NewWriter(tmp)
+	for _, l := range lines {
+		if _, err := bw.WriteString(l); err != nil {
+			tmp.Close()
+			_ = os.Remove(tmpPath)
 			fmt.Fprintf(os.Stderr, "sort: %s: %v\n", o.output, err)
 			return 2
 		}
-		defer f.Close()
-		out = f
+		if err := bw.WriteByte('\n'); err != nil {
+			tmp.Close()
+			_ = os.Remove(tmpPath)
+			fmt.Fprintf(os.Stderr, "sort: %s: %v\n", o.output, err)
+			return 2
+		}
 	}
-	bw := bufio.NewWriter(out)
-	defer bw.Flush()
-	for _, l := range lines {
-		bw.WriteString(l)
-		bw.WriteByte('\n')
+	if err := bw.Flush(); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmpPath)
+		fmt.Fprintf(os.Stderr, "sort: %s: %v\n", o.output, err)
+		return 2
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		fmt.Fprintf(os.Stderr, "sort: %s: %v\n", o.output, err)
+		return 2
+	}
+	if err := os.Rename(tmpPath, o.output); err != nil {
+		_ = os.Remove(tmpPath)
+		fmt.Fprintf(os.Stderr, "sort: %s: %v\n", o.output, err)
+		return 2
 	}
 	return 0
 }

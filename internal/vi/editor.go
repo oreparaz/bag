@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -115,6 +116,10 @@ func (e *Editor) Open(path string) error {
 }
 
 // Save writes the buffer back to e.file. With path != "", save-as.
+//
+// The write is atomic (temp + rename) so a partial flush leaves the
+// original intact, and the existing file's permission bits are preserved
+// so opening a 0600 SSH key for editing doesn't widen its mode to 0644.
 func (e *Editor) Save(path string) error {
 	target := path
 	if target == "" {
@@ -123,7 +128,33 @@ func (e *Editor) Save(path string) error {
 	if target == "" {
 		return errors.New("no file name (use :w PATH)")
 	}
-	if err := os.WriteFile(target, e.buf.Bytes(), 0o644); err != nil {
+	mode := os.FileMode(0o644)
+	if fi, err := os.Stat(target); err == nil && fi.Mode().IsRegular() {
+		mode = fi.Mode().Perm()
+	}
+	dir := filepath.Dir(target)
+	tmp, err := os.CreateTemp(dir, ".vi-save-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpPath) }
+	if _, err := tmp.Write(e.buf.Bytes()); err != nil {
+		tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpPath, target); err != nil {
+		cleanup()
 		return err
 	}
 	if path != "" {

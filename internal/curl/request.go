@@ -45,9 +45,12 @@ func buildRequest(ctx context.Context, method, url string, body io.Reader, ct st
 		req.Header.Set("Range", "bytes="+opts.Range)
 	}
 
-	// User-supplied headers override defaults / can delete (-H "Header:" is delete).
+	// User-supplied headers override defaults on first occurrence and
+	// append on subsequent occurrences for the same name (matches curl —
+	// `-H 'Cookie: a=1' -H 'Cookie: b=2'` should send both).
+	seen := map[string]bool{}
 	for _, h := range opts.Headers {
-		applyUserHeader(req, h)
+		applyUserHeaderOnce(req, h, seen)
 	}
 
 	// Basic auth.
@@ -85,10 +88,19 @@ func buildRequest(ctx context.Context, method, url string, body io.Reader, ct st
 //	"Name:"         delete
 //	"Name;"         set empty
 func applyUserHeader(req *http.Request, h string) {
+	applyUserHeaderOnce(req, h, nil)
+}
+
+func applyUserHeaderOnce(req *http.Request, h string, seen map[string]bool) {
 	if i := strings.IndexByte(h, ':'); i >= 0 {
 		name := strings.TrimSpace(h[:i])
 		val := strings.TrimSpace(h[i+1:])
 		if val == "" {
+			// `-H "Host:"` removes the Host override; otherwise normal Del.
+			if strings.EqualFold(name, "Host") {
+				req.Host = ""
+				return
+			}
 			req.Header.Del(name)
 			return
 		}
@@ -97,12 +109,35 @@ func applyUserHeader(req *http.Request, h string) {
 			req.Host = val
 			return
 		}
+		key := http.CanonicalHeaderKey(name)
+		if seen != nil && seen[key] {
+			if strings.EqualFold(name, "Cookie") {
+				// Multiple Cookie headers from the user are merged into a
+				// single header per RFC 6265 — proxies sometimes treat
+				// duplicate Cookie headers oddly.
+				existing := req.Header.Get(name)
+				if existing != "" {
+					req.Header.Set(name, existing+"; "+val)
+				} else {
+					req.Header.Set(name, val)
+				}
+			} else {
+				req.Header.Add(name, val)
+			}
+			return
+		}
 		req.Header.Set(name, val)
+		if seen != nil {
+			seen[key] = true
+		}
 		return
 	}
 	if i := strings.IndexByte(h, ';'); i >= 0 {
 		name := strings.TrimSpace(h[:i])
 		req.Header.Set(name, "")
+		if seen != nil {
+			seen[http.CanonicalHeaderKey(name)] = true
+		}
 	}
 }
 
