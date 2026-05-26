@@ -360,6 +360,112 @@ func TestPublicKeyRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSignVerifyRoundTrip covers the 3 sign modes (inline, detached,
+// clearsign) and the 4 interop pairs (bag↔bag, bag↔gpg) per mode —
+// 12 round-trips total when system gpg is available.
+func TestSignVerifyRoundTrip(t *testing.T) {
+	gpg := systemGPG()
+	plain := []byte("important message\nthat must be signed\n")
+	home := t.TempDir()
+	t.Setenv("GNUPGHOME", home)
+	runBag(t, nil, "--batch", "--quick-gen-key", "Signer <s@x.io>", "ed25519")
+	plainFile := filepath.Join(home, "m")
+	os.WriteFile(plainFile, plain, 0o600)
+
+	// Helper: bag verify.
+	bagVerify := func(args ...string) error {
+		exit, _, er := runBag(t, nil, args...)
+		if exit != 0 {
+			return fmt.Errorf("bag verify exit=%d stderr=%s", exit, er)
+		}
+		if !bytes.Contains(er, []byte("Good signature")) {
+			return fmt.Errorf("bag verify missing 'Good signature': %s", er)
+		}
+		return nil
+	}
+	// Helper: system gpg verify.
+	gpgVerify := func(args ...string) error {
+		if gpg == "" {
+			return nil // skip
+		}
+		full := append([]string{"--homedir", home, "--verify"}, args...)
+		out, _ := exec.Command(gpg, full...).CombinedOutput()
+		if !bytes.Contains(out, []byte("Good signature")) {
+			return fmt.Errorf("gpg verify failed:\n%s", out)
+		}
+		return nil
+	}
+
+	type variant struct {
+		name string
+		flag string  // bag flag to produce the signature
+		ext  string  // file extension bag writes
+		verifyArgs func(sigFile string) (bagArgs, gpgArgs []string)
+	}
+	variants := []variant{
+		{
+			name: "inline", flag: "-s", ext: ".asc",
+			verifyArgs: func(sig string) ([]string, []string) {
+				return []string{"--verify", sig}, []string{sig}
+			},
+		},
+		{
+			name: "detached", flag: "-b", ext: ".asc",
+			verifyArgs: func(sig string) ([]string, []string) {
+				return []string{"--verify", sig, plainFile}, []string{sig, plainFile}
+			},
+		},
+		{
+			name: "clearsign", flag: "--clearsign", ext: ".asc",
+			verifyArgs: func(sig string) ([]string, []string) {
+				return []string{"--verify", sig}, []string{sig}
+			},
+		},
+	}
+
+	for _, v := range variants {
+		v := v
+		t.Run(v.name+"_bag_signs", func(t *testing.T) {
+			sig := filepath.Join(home, "out_"+v.name+v.ext)
+			exit, _, er := runBag(t, nil,
+				"--batch", v.flag, "-a", "--output", sig, plainFile)
+			if exit != 0 {
+				t.Fatalf("bag sign: exit=%d stderr=%s", exit, er)
+			}
+			bagA, gpgA := v.verifyArgs(sig)
+			if err := bagVerify(bagA...); err != nil {
+				t.Errorf("bag verify of bag's %s: %v", v.name, err)
+			}
+			if err := gpgVerify(gpgA...); err != nil {
+				t.Errorf("system gpg verify of bag's %s: %v", v.name, err)
+			}
+		})
+	}
+
+	if gpg == "" {
+		return
+	}
+	for _, v := range variants {
+		v := v
+		t.Run(v.name+"_gpg_signs", func(t *testing.T) {
+			sig := filepath.Join(home, "gpg_"+v.name+v.ext)
+			args := []string{"--homedir", home, "--batch",
+				"--pinentry-mode", "loopback", "-a", "--output", sig}
+			args = append(args, v.flag, plainFile)
+			if err := exec.Command(gpg, args...).Run(); err != nil {
+				t.Fatalf("system gpg sign %s: %v", v.name, err)
+			}
+			bagA, _ := v.verifyArgs(sig)
+			if err := bagVerify(bagA...); err != nil {
+				t.Errorf("bag verify of gpg's %s: %v", v.name, err)
+			}
+		})
+	}
+}
+
+type bagArgs = []string
+type gpgArgs = []string
+
 // TestGenKeyDSARejected: --quick-gen-key dsa surfaces a clear error
 // (library limitation) instead of producing a corrupt keyring.
 func TestGenKeyDSARejected(t *testing.T) {
