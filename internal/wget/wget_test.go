@@ -3,6 +3,8 @@ package wget
 import (
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -185,6 +187,55 @@ func TestCACertificate(t *testing.T) {
 	}
 }
 
+// TestRedirectStripsCredentialsCrossHost is the regression test for the
+// critical-severity audit finding: wget must not forward Authorization
+// (from --user/--password) or Cookie (from --header) to a redirect
+// target that lives on a different host. A malicious server returning
+// `Location: https://attacker/` would otherwise harvest the user's
+// credentials.
+func TestRedirectStripsCredentialsCrossHost(t *testing.T) {
+	// "Attacker" server records what credentials it sees. We funnel the
+	// captured headers through a channel so the read in the test goroutine
+	// happens-after the handler's write (otherwise it's a data race that
+	// can silently pass even when the bug is present).
+	type seen struct{ auth, cookie string }
+	seenCh := make(chan seen, 1)
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenCh <- seen{auth: r.Header.Get("Authorization"), cookie: r.Header.Get("Cookie")}
+		w.Write([]byte("attacker reached\n"))
+	}))
+	defer attacker.Close()
+
+	// "Victim" server: 302s the client to attacker. Both bind to 127.0.0.1
+	// on different ports, and we keep the redirect target on the same
+	// hostname — that's the subtle case where Go's stdlib *keeps* the
+	// credentials (foo:1234 -> foo:5678 is "same eTLD+1" by Go's reckoning).
+	// Bag-wget's CheckRedirect strips on *any* Host change, which is what
+	// this test exercises.
+	victim := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, attacker.URL+"/steal", http.StatusFound)
+	}))
+	defer victim.Close()
+
+	exit, out, _, _ := runWget(t, "-q", "-O", "-",
+		"--user=alice", "--password=hunter2",
+		"--header=Cookie: session=secret-token",
+		victim.URL+"/")
+	if exit != 0 {
+		t.Fatalf("exit=%d out=%q", exit, out)
+	}
+	if string(out) != "attacker reached\n" {
+		t.Errorf("redirect did not follow: out=%q", out)
+	}
+	got := <-seenCh
+	if got.auth != "" {
+		t.Errorf("Authorization LEAKED to attacker on cross-host redirect: %q", got.auth)
+	}
+	if got.cookie != "" {
+		t.Errorf("Cookie LEAKED to attacker on cross-host redirect: %q", got.cookie)
+	}
+}
+
 func TestRedirectFollows(t *testing.T) {
 	srv := mustStart(t)
 	exit, out, _, _ := runWget(t, "-q", "-O", "-", srv.HTTP.URL+"/redirect/3")
@@ -362,3 +413,4 @@ func TestExtractLinks(t *testing.T) {
 		t.Errorf("missing links: %v", want)
 	}
 }
+
