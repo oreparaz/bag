@@ -466,6 +466,51 @@ func TestSignVerifyRoundTrip(t *testing.T) {
 type bagArgs = []string
 type gpgArgs = []string
 
+// TestSignEncryptCombined: `-se -r USER` produces an encrypted-AND-
+// signed message; both bag and system gpg must recover the plaintext
+// AND verify the signature.
+func TestSignEncryptCombined(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GNUPGHOME", home)
+	runBag(t, nil, "--batch", "--quick-gen-key", "Sender <sender@x.io>", "ed25519")
+	plain := []byte("sign+encrypt round trip\n")
+	plainFile := filepath.Join(home, "p")
+	os.WriteFile(plainFile, plain, 0o600)
+	cipher := filepath.Join(home, "c.gpg")
+
+	exit, _, er := runBag(t, nil,
+		"--batch", "-se", "-r", "sender",
+		"--output", cipher, plainFile)
+	if exit != 0 {
+		t.Fatalf("bag -se exit=%d stderr=%s", exit, er)
+	}
+
+	// bag decrypts and reports Good signature.
+	exit, got, er := runBag(t, nil, "--batch", "-d", "--output", "-", cipher)
+	if exit != 0 {
+		t.Fatalf("bag -d exit=%d stderr=%s", exit, er)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Errorf("bag→bag mismatch: got %q", got)
+	}
+	if !bytes.Contains(er, []byte("Good signature")) {
+		t.Errorf("bag didn't report signature: %s", er)
+	}
+
+	gpg := systemGPG()
+	if gpg == "" {
+		return
+	}
+	out, err := exec.Command(gpg, "--homedir", home,
+		"--batch", "--pinentry-mode", "loopback", "--decrypt", cipher).Output()
+	if err != nil {
+		t.Fatalf("system gpg decrypt: %v", err)
+	}
+	if !bytes.Equal(out, plain) {
+		t.Errorf("bag→gpg mismatch: got %q", out)
+	}
+}
+
 // TestGenKeyDSARejected: --quick-gen-key dsa surfaces a clear error
 // (library limitation) instead of producing a corrupt keyring.
 func TestGenKeyDSARejected(t *testing.T) {

@@ -32,6 +32,9 @@ const (
 
 type options struct {
 	act action
+	// alsoSign means --sign was passed alongside --encrypt; the
+	// encrypted message gets a signature wrapped inside it.
+	alsoSign bool
 
 	// I/O.
 	input  string // positional input file; "" means stdin.
@@ -125,6 +128,8 @@ func parseArgs(argv []string) (*options, error) {
 			case "sign":
 				if o.act == actionNone {
 					o.act = actionSign
+				} else if o.act == actionEncryptPublic || o.act == actionEncryptSymmetric {
+					o.alsoSign = true
 				}
 			case "detach-sign":
 				o.act = actionDetachSign
@@ -268,6 +273,8 @@ func parseArgs(argv []string) (*options, error) {
 				case 's':
 					if o.act == actionNone {
 						o.act = actionSign
+					} else if o.act == actionEncryptPublic || o.act == actionEncryptSymmetric {
+						o.alsoSign = true
 					}
 				case 'b':
 					o.act = actionDetachSign

@@ -51,11 +51,34 @@ func doEncryptPublic(o *options) error {
 		hints.FileName = ""
 	}
 
-	// If --sign was combined with --encrypt, look up the signer's
-	// secret key now (so the user gets a clear error before bytes
-	// flow).
+	// If --sign was combined with --encrypt, pick a signer from the
+	// secret keyring (matching --local-user when given) and unlock
+	// its private material if it's passphrase-protected. The library
+	// embeds a one-pass signature packet inside the encrypted stream
+	// so the recipient sees both layers.
 	var signer *openpgp.Entity
-	// (combined sign+encrypt is M5 territory; left here as a hook.)
+	if o.alsoSign {
+		if len(kr.secret) == 0 {
+			return fmt.Errorf("--sign with --encrypt needs a secret key")
+		}
+		if o.localUser != "" {
+			signer = findEntity(kr.secret, o.localUser)
+			if signer == nil {
+				return fmt.Errorf("--local-user %q: no matching secret key", o.localUser)
+			}
+		} else {
+			signer = kr.secret[0]
+		}
+		if signer.PrivateKey != nil && signer.PrivateKey.Encrypted {
+			pp, err := readPassphrase(o, "Enter passphrase for signing key: ")
+			if err != nil {
+				return err
+			}
+			if err := signer.PrivateKey.Decrypt(pp); err != nil {
+				return fmt.Errorf("bad passphrase: %w", err)
+			}
+		}
+	}
 
 	cfg := configFromOptions(o)
 	w, err := openpgp.Encrypt(armorCloser, recipients, signer, hints, cfg)
