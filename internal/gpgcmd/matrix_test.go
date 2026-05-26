@@ -195,10 +195,13 @@ func testPublicKeyRoundTrip(t *testing.T, gpg, home string, plain []byte, armore
 	}
 	cmd := exec.Command(gpg, "--homedir", home, "--batch",
 		"--pinentry-mode", "loopback", "--decrypt", bagCipher)
-	got, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("system decrypt: %v", err)
+	var decOut, decErr bytes.Buffer
+	cmd.Stdout = &decOut
+	cmd.Stderr = &decErr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("system decrypt: %v\nstderr:\n%s", err, decErr.String())
 	}
+	got := decOut.Bytes()
 	if !bytes.Equal(got, plain) {
 		t.Errorf("bag→gpg mismatch %s", fmtBytes(got))
 	}
@@ -216,8 +219,8 @@ func testPublicKeyRoundTrip(t *testing.T, gpg, home string, plain []byte, armore
 		encArgs2 = append(encArgs2, "-a")
 	}
 	encArgs2 = append(encArgs2, "--output", gpgCipher, plainFile)
-	if err := exec.Command(gpg, encArgs2...).Run(); err != nil {
-		t.Fatalf("system encrypt: %v", err)
+	if out, err := exec.Command(gpg, encArgs2...).CombinedOutput(); err != nil {
+		t.Fatalf("system encrypt: %v\noutput:\n%s", err, out)
 	}
 	exit, got, er = runBag(t, nil, "--homedir", home,
 		"-d", "--output", "-", gpgCipher)
@@ -265,8 +268,8 @@ func testSignVerifyRoundTrip(t *testing.T, gpg, home, mode string) {
 	gpgSig := filepath.Join(dir, "gpg.sig")
 	signArgs := []string{"--homedir", home, "--batch",
 		"--pinentry-mode", "loopback", "-a", "--output", gpgSig, mode, plainFile}
-	if err := exec.Command(gpg, signArgs...).Run(); err != nil {
-		t.Fatalf("gpg sign %s: %v", mode, err)
+	if out, err := exec.Command(gpg, signArgs...).CombinedOutput(); err != nil {
+		t.Fatalf("gpg sign %s: %v\noutput:\n%s", mode, err, out)
 	}
 	verifyArgs = []string{"--homedir", home, "--verify", gpgSig}
 	if mode == "-b" {
