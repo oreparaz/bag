@@ -249,6 +249,90 @@ func doExport(o *options, secret bool) error {
 	return nil
 }
 
+// doDeleteKeys removes the entity matching o.exportUser from the
+// keyring on disk. When alsoSecret is true, only the secret half is
+// removed (public stays). For real --delete-keys (alsoSecret=false)
+// we refuse if a corresponding secret key is still present, matching
+// gpg's safeguard.
+func doDeleteKeys(o *options, alsoSecret bool) error {
+	if o.exportUser == "" {
+		return fmt.Errorf("delete-keys requires a key identifier")
+	}
+	kr, err := loadKeyrings(o)
+	if err != nil {
+		return err
+	}
+
+	if !alsoSecret {
+		// --delete-keys: refuse if a secret key matches first.
+		for _, e := range kr.secret {
+			if matchUserID(e, o.exportUser) {
+				return fmt.Errorf("there is a secret key for %q; use --delete-secret-keys first",
+					o.exportUser)
+			}
+		}
+	}
+
+	home := homeDir(o)
+	if err := rewriteKeyring(filepath.Join(home, "secring.gpg"), kr.secret, o.exportUser, true); err != nil {
+		return err
+	}
+	if !alsoSecret {
+		if err := rewriteKeyring(filepath.Join(home, "pubring.gpg"), kr.public, o.exportUser, false); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(stderr(), "gpg: key %q deleted\n", o.exportUser)
+	return nil
+}
+
+// rewriteKeyring filters out any entity whose UID/fingerprint matches
+// query, then atomically replaces path with the trimmed keyring. We
+// write to a tempfile in the same directory and rename so a crash
+// can't leave a half-written keyring.
+func rewriteKeyring(path string, list openpgp.EntityList, query string, secret bool) error {
+	var kept openpgp.EntityList
+	for _, e := range list {
+		if matchUserID(e, query) {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".kr-rewrite-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+	for _, e := range kept {
+		if secret {
+			if e.PrivateKey == nil {
+				continue
+			}
+			if err := e.SerializePrivateWithoutSigning(tmp, nil); err != nil {
+				tmp.Close()
+				cleanup()
+				return err
+			}
+		} else {
+			if err := e.Serialize(tmp); err != nil {
+				tmp.Close()
+				cleanup()
+				return err
+			}
+		}
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
+}
+
 // primaryUIDString picks the human-readable UID for log messages.
 func primaryUIDString(e *openpgp.Entity) string {
 	for _, id := range e.Identities {

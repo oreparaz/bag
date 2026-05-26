@@ -26,6 +26,8 @@ const (
 	actionImport
 	actionExport
 	actionExportSecret
+	actionDeleteKeys
+	actionDeleteSecretKeys
 	actionHelp
 	actionVersion
 )
@@ -151,6 +153,12 @@ func parseArgs(argv []string) (*options, error) {
 				o.act = actionExport
 			case "export-secret-keys", "export-secret-subkeys":
 				o.act = actionExportSecret
+			case "delete-keys", "delete-key":
+				o.act = actionDeleteKeys
+			case "delete-secret-keys", "delete-secret-key":
+				o.act = actionDeleteSecretKeys
+			case "delete-secret-and-public-keys", "delete-secret-and-public-key":
+				o.act = actionDeleteSecretKeys // we'll also clear pub
 			case "help":
 				o.act = actionHelp
 			case "version":
@@ -344,7 +352,8 @@ func parseArgs(argv []string) (*options, error) {
 	switch o.act {
 	case actionImport:
 		o.importFiles = positional
-	case actionExport, actionExportSecret, actionListKeys, actionListSecretKeys:
+	case actionExport, actionExportSecret, actionListKeys, actionListSecretKeys,
+		actionDeleteKeys, actionDeleteSecretKeys:
 		if len(positional) > 0 {
 			o.exportUser = positional[0]
 		}

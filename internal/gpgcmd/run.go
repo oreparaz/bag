@@ -82,6 +82,10 @@ func runAction(o *options) error {
 		return doExport(o, false)
 	case actionExportSecret:
 		return doExport(o, true)
+	case actionDeleteKeys:
+		return doDeleteKeys(o, false)
+	case actionDeleteSecretKeys:
+		return doDeleteKeys(o, true)
 	}
 	return fmt.Errorf("unknown action")
 }

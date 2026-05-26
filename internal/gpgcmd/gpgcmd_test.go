@@ -511,6 +511,45 @@ func TestSignEncryptCombined(t *testing.T) {
 	}
 }
 
+// TestDeleteKeys: --delete-secret-keys then --delete-keys removes a
+// UID from both keyrings, leaving the others intact.
+func TestDeleteKeys(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GNUPGHOME", home)
+	runBag(t, nil, "--batch", "--quick-gen-key", "Keep <keep@x.io>", "ed25519")
+	runBag(t, nil, "--batch", "--quick-gen-key", "Drop <drop@x.io>", "ed25519")
+
+	// Sanity: both UIDs present.
+	_, out, _ := runBag(t, nil, "--list-keys")
+	if !bytes.Contains(out, []byte("keep@x.io")) || !bytes.Contains(out, []byte("drop@x.io")) {
+		t.Fatalf("setup failed; got %s", out)
+	}
+
+	// --delete-keys must refuse when secret material is present.
+	exit, _, _ := runBag(t, nil, "--batch", "--delete-keys", "drop")
+	if exit == 0 {
+		t.Errorf("--delete-keys should refuse while secret key exists")
+	}
+
+	// Delete secret, then pub.
+	exit, _, er := runBag(t, nil, "--batch", "--delete-secret-keys", "drop")
+	if exit != 0 {
+		t.Fatalf("delete-secret-keys: exit=%d stderr=%s", exit, er)
+	}
+	exit, _, er = runBag(t, nil, "--batch", "--delete-keys", "drop")
+	if exit != 0 {
+		t.Fatalf("delete-keys: exit=%d stderr=%s", exit, er)
+	}
+
+	_, out, _ = runBag(t, nil, "--list-keys")
+	if bytes.Contains(out, []byte("drop@x.io")) {
+		t.Errorf("dropped UID still present: %s", out)
+	}
+	if !bytes.Contains(out, []byte("keep@x.io")) {
+		t.Errorf("kept UID removed accidentally: %s", out)
+	}
+}
+
 // TestGenKeyDSARejected: --quick-gen-key dsa surfaces a clear error
 // (library limitation) instead of producing a corrupt keyring.
 func TestGenKeyDSARejected(t *testing.T) {
