@@ -133,6 +133,35 @@ func TestEREGroups(t *testing.T) {
 	}
 }
 
+// TestPatternFileTrailingNewline: a pattern file's terminal `\n` is the
+// line separator, not an empty pattern. Empty pattern would otherwise
+// match everything via the alternation `(?:pat)|(?:)`. Discovered while
+// running coreutils' tests/misc/usage_vs_getopt.sh: grep -Ff with a
+// normal pattern file was matching every line, falsely flagging valid
+// error messages as "unrecognized option".
+func TestPatternFileTrailingNewline(t *testing.T) {
+	dir := t.TempDir()
+	pat := filepath.Join(dir, "pat")
+	// One pattern, one trailing newline (the typical layout).
+	os.WriteFile(pat, []byte("FOO\n"), 0o644)
+	exit, _ := runGrep(t, []byte("anything\n"), "-Ff", pat)
+	if exit == 0 {
+		t.Errorf("grep -Ff with file 'FOO\\n' must NOT match 'anything'")
+	}
+}
+
+// And: an EXPLICIT empty line in the pattern file IS preserved as an
+// empty pattern (which matches every line), matching GNU grep.
+func TestPatternFileExplicitEmptyLine(t *testing.T) {
+	dir := t.TempDir()
+	pat := filepath.Join(dir, "pat")
+	os.WriteFile(pat, []byte("FOO\n\n"), 0o644)
+	exit, out := runGrep(t, []byte("anything\n"), "-Ff", pat)
+	if exit != 0 || out != "anything\n" {
+		t.Errorf("explicit empty line should match all: exit=%d out=%q", exit, out)
+	}
+}
+
 func TestWordRegexp(t *testing.T) {
 	_, out := runGrep(t, []byte("foobar\nfoo bar\n"), "-w", "foo")
 	if out != "foo bar\n" {

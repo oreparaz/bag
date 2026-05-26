@@ -591,7 +591,13 @@ func parseArgs(args []string) (*options, error) {
 				if err != nil {
 					return nil, err
 				}
-				o.patterns = append(o.patterns, string(body))
+				// Strip a single trailing newline: GNU grep treats the
+				// final \n as the line terminator, not as an empty
+				// pattern. A literal extra blank line IS preserved as
+				// an empty pattern (which matches every line).
+				s := string(body)
+				s = strings.TrimSuffix(s, "\n")
+				o.patterns = append(o.patterns, s)
 				j = len(a)
 			case 'V':
 				o.printVersion = true
