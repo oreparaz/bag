@@ -183,6 +183,53 @@ func TestDecryptDoesNotOverwriteInput(t *testing.T) {
 	}
 }
 
+// TestGenKey covers --quick-gen-key for every algorithm bag can
+// generate. After each genkey we re-load the resulting keyring with
+// system gpg (when available) to assert binary compatibility.
+func TestGenKey(t *testing.T) {
+	for _, algo := range []string{"rsa2048", "ed25519", "ecdsa", "default"} {
+		algo := algo
+		t.Run(algo, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("GNUPGHOME", home)
+			uid := fmt.Sprintf("Test %s <%s@example.com>", algo, algo)
+			exit, _, er := runBag(t, nil,
+				"--batch", "--quick-gen-key", uid, algo)
+			if exit != 0 {
+				t.Fatalf("quick-gen-key %s: exit=%d stderr=%s", algo, exit, er)
+			}
+			// pubring + secring present.
+			for _, f := range []string{"pubring.gpg", "secring.gpg"} {
+				if _, err := os.Stat(filepath.Join(home, f)); err != nil {
+					t.Errorf("missing %s: %v", f, err)
+				}
+			}
+			gpg := systemGPG()
+			if gpg == "" {
+				return
+			}
+			out, _ := exec.Command(gpg, "--homedir", home, "--list-keys").CombinedOutput()
+			if !bytes.Contains(out, []byte(algo+"@example.com")) {
+				t.Errorf("system gpg can't see uid: out=%s", out)
+			}
+		})
+	}
+}
+
+// TestGenKeyDSARejected: --quick-gen-key dsa surfaces a clear error
+// (library limitation) instead of producing a corrupt keyring.
+func TestGenKeyDSARejected(t *testing.T) {
+	t.Setenv("GNUPGHOME", t.TempDir())
+	exit, _, er := runBag(t, nil,
+		"--batch", "--quick-gen-key", "Test <x@y.com>", "dsa")
+	if exit == 0 {
+		t.Errorf("dsa keygen should fail clearly; stderr=%s", er)
+	}
+	if !bytes.Contains(er, []byte("DSA")) && !bytes.Contains(er, []byte("dsa")) {
+		t.Errorf("expected error to mention DSA: %s", er)
+	}
+}
+
 // fmtBytes is a tiny helper for diff messages.
 func fmtBytes(b []byte) string {
 	if len(b) > 32 {

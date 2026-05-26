@@ -22,8 +22,7 @@ func doEncryptPublic(o *options) error { return errors.New("public-key encrypt: 
 func doSign(o *options, k signKind) error {
 	return errors.New("sign: not implemented yet")
 }
-func doVerify(o *options) error    { return errors.New("verify: not implemented yet") }
-func doGenKey(o *options) error    { return errors.New("gen-key: not implemented yet") }
+func doVerify(o *options) error { return errors.New("verify: not implemented yet") }
 func doListKeys(o *options, secret bool) error {
 	return errors.New("list-keys: not implemented yet")
 }
