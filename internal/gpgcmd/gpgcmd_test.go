@@ -277,6 +277,89 @@ func TestExportImportRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPublicKeyRoundTrip:
+//   - bag generates a key for Alice
+//   - bag encrypts a message to Alice
+//   - bag decrypts → plaintext
+//   - bag re-encrypts, system gpg decrypts (interop) → plaintext
+//   - system gpg generates a key for Bob, bag imports the pub, encrypts,
+//     system gpg decrypts → plaintext
+func TestPublicKeyRoundTrip(t *testing.T) {
+	plain := []byte("public-key encrypted hello\n")
+
+	// Phase 1: bag-only path.
+	homeAlice := t.TempDir()
+	t.Setenv("GNUPGHOME", homeAlice)
+	runBag(t, nil, "--batch", "--quick-gen-key", "Alice <alice@x.io>", "ed25519")
+	plainFile := filepath.Join(homeAlice, "msg.txt")
+	os.WriteFile(plainFile, plain, 0o600)
+	cipherFile := filepath.Join(homeAlice, "msg.gpg")
+	exit, _, er := runBag(t, nil,
+		"--batch", "--encrypt", "-r", "alice", "--output", cipherFile, plainFile)
+	if exit != 0 {
+		t.Fatalf("bag encrypt: exit=%d stderr=%s", exit, er)
+	}
+	exit, got, er := runBag(t, nil,
+		"--batch", "-d", "--output", "-", cipherFile)
+	if exit != 0 {
+		t.Fatalf("bag decrypt: exit=%d stderr=%s", exit, er)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Errorf("bag→bag plain mismatch: got %q", got)
+	}
+
+	gpg := systemGPG()
+	if gpg == "" {
+		return
+	}
+
+	// Phase 2: bag → system gpg. The same alice keyring works because
+	// bag wrote pubring.gpg / secring.gpg in the legacy format.
+	cmd := exec.Command(gpg, "--homedir", homeAlice,
+		"--batch", "--pinentry-mode", "loopback", "--decrypt", cipherFile)
+	got, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("system gpg --decrypt of bag output: %v", err)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Errorf("bag→system mismatch: got %q", got)
+	}
+
+	// Phase 3: system gpg generates Bob; bag encrypts to him; system decrypts.
+	homeBob := t.TempDir()
+	os.Chmod(homeBob, 0o700)
+	cmd = exec.Command(gpg, "--homedir", homeBob,
+		"--batch", "--pinentry-mode", "loopback", "--passphrase", "",
+		"--quick-gen-key", "Bob <bob@x.io>")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("system gpg keygen: %v", err)
+	}
+	exported, err := exec.Command(gpg, "--homedir", homeBob, "--export", "-a", "bob").Output()
+	if err != nil {
+		t.Fatalf("system gpg export: %v", err)
+	}
+	homeBag := t.TempDir()
+	t.Setenv("GNUPGHOME", homeBag)
+	exit, _, er = runBag(t, exported, "--import")
+	if exit != 0 {
+		t.Fatalf("bag import of system pubkey: exit=%d stderr=%s", exit, er)
+	}
+	bobCipher := filepath.Join(homeBag, "bob.gpg")
+	exit, _, er = runBag(t, nil,
+		"--batch", "--encrypt", "-r", "bob", "--output", bobCipher, plainFile)
+	if exit != 0 {
+		t.Fatalf("bag encrypt to bob: exit=%d stderr=%s", exit, er)
+	}
+	got, err = exec.Command(gpg, "--homedir", homeBob,
+		"--batch", "--pinentry-mode", "loopback", "--decrypt", bobCipher).Output()
+	if err != nil {
+		t.Fatalf("system gpg decrypt of bag-encrypted message: %v", err)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Errorf("system←bag mismatch: got %q", got)
+	}
+}
+
 // TestGenKeyDSARejected: --quick-gen-key dsa surfaces a clear error
 // (library limitation) instead of producing a corrupt keyring.
 func TestGenKeyDSARejected(t *testing.T) {

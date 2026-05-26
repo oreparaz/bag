@@ -18,7 +18,6 @@ const (
 	signClear
 )
 
-func doEncryptPublic(o *options) error { return errors.New("public-key encrypt: not implemented yet") }
 func doSign(o *options, k signKind) error {
 	return errors.New("sign: not implemented yet")
 }
