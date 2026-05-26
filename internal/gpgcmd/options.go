@@ -28,6 +28,10 @@ const (
 	actionExportSecret
 	actionDeleteKeys
 	actionDeleteSecretKeys
+	actionEnarmor
+	actionDearmor
+	actionPrintMD
+	actionListPackets
 	actionHelp
 	actionVersion
 )
@@ -159,6 +163,14 @@ func parseArgs(argv []string) (*options, error) {
 				o.act = actionDeleteSecretKeys
 			case "delete-secret-and-public-keys", "delete-secret-and-public-key":
 				o.act = actionDeleteSecretKeys // we'll also clear pub
+			case "enarmor":
+				o.act = actionEnarmor
+			case "dearmor":
+				o.act = actionDearmor
+			case "print-md", "print-mds":
+				o.act = actionPrintMD
+			case "list-packets":
+				o.act = actionListPackets
 			case "help":
 				o.act = actionHelp
 			case "version":
@@ -365,6 +377,14 @@ func parseArgs(argv []string) (*options, error) {
 		}
 		if len(positional) >= 2 {
 			o.input = positional[1]
+		}
+	case actionPrintMD:
+		// --print-md ALGO [FILE...]
+		if len(positional) >= 1 {
+			o.digest = positional[0]
+		}
+		if len(positional) >= 2 {
+			o.importFiles = positional[1:]
 		}
 	case actionQuickGenKey:
 		// `--quick-gen-key USER-ID [ALGO [USAGE [EXPIRE]]]`

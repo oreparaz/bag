@@ -86,6 +86,14 @@ func runAction(o *options) error {
 		return doDeleteKeys(o, false)
 	case actionDeleteSecretKeys:
 		return doDeleteKeys(o, true)
+	case actionEnarmor:
+		return doEnarmor(o)
+	case actionDearmor:
+		return doDearmor(o)
+	case actionPrintMD:
+		return doPrintMD(o)
+	case actionListPackets:
+		return doListPackets(o)
 	}
 	return fmt.Errorf("unknown action")
 }

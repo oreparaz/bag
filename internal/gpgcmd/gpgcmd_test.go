@@ -571,3 +571,124 @@ func fmtBytes(b []byte) string {
 	}
 	return fmt.Sprintf("%q", b)
 }
+
+// TestEnarmorDearmorRoundTrip wraps and unwraps a binary payload via
+// bag's --enarmor / --dearmor, then confirms that gpg --dearmor reads
+// the same envelope. This is pure framing — no crypto — but it's
+// exactly the failure mode where tools disagree (line lengths, CRC
+// trailer, header order).
+func TestEnarmorDearmorRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	bin := []byte("\x88\x40\x01\x02\x03\x04\x05\x06binary opaque body\xff\xfe\xfd")
+	binFile := filepath.Join(dir, "blob.bin")
+	if err := os.WriteFile(binFile, bin, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	armored := filepath.Join(dir, "blob.asc")
+	exit, _, er := runBag(t, nil, "--enarmor", "-o", armored, binFile)
+	if exit != 0 {
+		t.Fatalf("enarmor: exit=%d stderr=%s", exit, er)
+	}
+	a, _ := os.ReadFile(armored)
+	if !bytes.Contains(a, []byte("-----BEGIN PGP MESSAGE-----")) {
+		t.Fatalf("expected armor header; got %s", a)
+	}
+
+	// bag dearmor → original bytes.
+	back := filepath.Join(dir, "blob.out")
+	exit, _, er = runBag(t, nil, "--dearmor", "-o", back, armored)
+	if exit != 0 {
+		t.Fatalf("dearmor: exit=%d stderr=%s", exit, er)
+	}
+	got, _ := os.ReadFile(back)
+	if !bytes.Equal(got, bin) {
+		t.Fatalf("dearmor mismatch: got %s want %s", fmtBytes(got), fmtBytes(bin))
+	}
+
+	// Interop: system gpg --dearmor must also accept bag's armor.
+	if gpg := systemGPG(); gpg != "" {
+		out := filepath.Join(dir, "blob.sysgpg")
+		cmd := exec.Command(gpg, "--dearmor", "--output", out, armored)
+		if outBytes, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("system gpg --dearmor: %v\n%s", err, outBytes)
+		}
+		sys, _ := os.ReadFile(out)
+		if !bytes.Equal(sys, bin) {
+			t.Fatalf("system gpg dearmor mismatch: got %s want %s",
+				fmtBytes(sys), fmtBytes(bin))
+		}
+	}
+}
+
+// TestPrintMDMatchesSystem runs bag --print-md against system gpg for
+// a few digests. We trim whitespace for comparison because gpg pads
+// long-format hashes differently across versions.
+func TestPrintMDMatchesSystem(t *testing.T) {
+	gpg := systemGPG()
+	if gpg == "" {
+		t.Skip("no system gpg; skipping interop digest test")
+	}
+	dir := t.TempDir()
+	data := bytes.Repeat([]byte("the quick brown fox\n"), 50)
+	file := filepath.Join(dir, "data.bin")
+	if err := os.WriteFile(file, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, algo := range []string{"SHA1", "SHA256", "SHA512"} {
+		t.Run(algo, func(t *testing.T) {
+			exit, out, er := runBag(t, nil, "--print-md", algo, file)
+			if exit != 0 {
+				t.Fatalf("bag --print-md %s: exit=%d stderr=%s", algo, exit, er)
+			}
+			cmd := exec.Command(gpg, "--print-md", algo, file)
+			sys, err := cmd.Output()
+			if err != nil {
+				t.Fatalf("system gpg --print-md %s: %v", algo, err)
+			}
+			// Reduce both to "just the hex bytes" — gpg's whitespace
+			// drifts between versions but the hex itself must match.
+			normalize := func(b []byte) string {
+				s := strings.ToUpper(string(b))
+				if i := strings.Index(s, ":"); i >= 0 {
+					s = s[i+1:]
+				}
+				return strings.Join(strings.Fields(s), "")
+			}
+			if a, b := normalize(out), normalize(sys); a != b {
+				t.Fatalf("%s mismatch:\n bag: %s\n gpg: %s", algo, a, b)
+			}
+		})
+	}
+}
+
+// TestListPacketsSeesSymmetric: encrypt with bag -c, run bag
+// --list-packets on the result, look for the expected packet labels.
+// We don't pin the exact text (it's a debug dump, not an API) but we
+// require at least one of the known cleartext markers.
+func TestListPacketsSeesSymmetric(t *testing.T) {
+	dir := t.TempDir()
+	plain := filepath.Join(dir, "plain")
+	if err := os.WriteFile(plain, []byte("watching the packets go by"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	exit, _, er := runBag(t, []byte("topsecret\n"),
+		"-c", "--batch", "--yes",
+		"--passphrase-fd", "0", "-o", plain+".gpg", plain)
+	if exit != 0 {
+		t.Fatalf("encrypt: exit=%d stderr=%s", exit, er)
+	}
+	exit, out, er := runBag(t, nil, "--list-packets", plain+".gpg")
+	if exit != 0 {
+		t.Fatalf("list-packets: exit=%d stderr=%s", exit, er)
+	}
+	// We expect to see a symkey-encrypted session key and an encrypted
+	// data packet. The exact wording is bag's, so match on the labels
+	// bag itself prints.
+	if !bytes.Contains(out, []byte("symkey-encrypted session key")) {
+		t.Errorf("expected symkey session key packet; got:\n%s", out)
+	}
+	if !bytes.Contains(out, []byte("encrypted data packet")) {
+		t.Errorf("expected encrypted data packet; got:\n%s", out)
+	}
+}
