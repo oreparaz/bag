@@ -72,10 +72,18 @@ func runSession(client *xssh.Client, o *options) error {
 	// need to make sure stdin doesn't block forever after the remote
 	// exits. The pipe Close in defer (above, via sess.Close) handles
 	// that.
+	//
+	// Snapshot os.Stdin / os.Stdout / os.Stderr into local variables
+	// before spawning. The goroutines may outlive this function (the
+	// stdin pump in particular can be stuck on a TTY read), and we
+	// don't want them racing on the *Files globals when callers reset
+	// them — e.g. tests using captureStdout, or anything that does
+	// `os.Stdout = …`. Each goroutine has its own snapshot.
+	in, out, errOut := os.Stdin, os.Stdout, os.Stderr
 	done := make(chan struct{}, 3)
-	go func() { _, _ = io.Copy(stdin, os.Stdin); _ = stdin.Close(); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(os.Stdout, stdout); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(os.Stderr, stderr); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(stdin, in); _ = stdin.Close(); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(out, stdout); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(errOut, stderr); done <- struct{}{} }()
 
 	err = sess.Wait()
 	// Drain stdout/stderr — but stdin may still be blocked on a TTY
