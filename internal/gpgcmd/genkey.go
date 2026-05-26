@@ -296,8 +296,9 @@ func lockEntity(entity *openpgp.Entity, pp []byte) error {
 }
 
 // appendToKeyring writes entity.Serialize() (public material) to
-// pubring.gpg and entity.SerializePrivate() (secret material) to
-// secring.gpg, creating both files if missing.
+// pubring.gpg and, if the entity carries private key material,
+// entity.SerializePrivateWithoutSigning() to secring.gpg. Public-only
+// imports skip the secring write.
 func appendToKeyring(o *options, entity *openpgp.Entity) error {
 	home := homeDir(o)
 	if err := os.MkdirAll(home, 0o700); err != nil {
@@ -306,8 +307,10 @@ func appendToKeyring(o *options, entity *openpgp.Entity) error {
 	if err := appendEntity(filepath.Join(home, "pubring.gpg"), entity, false); err != nil {
 		return err
 	}
-	if err := appendEntity(filepath.Join(home, "secring.gpg"), entity, true); err != nil {
-		return err
+	if entity.PrivateKey != nil {
+		if err := appendEntity(filepath.Join(home, "secring.gpg"), entity, true); err != nil {
+			return err
+		}
 	}
 	return nil
 }

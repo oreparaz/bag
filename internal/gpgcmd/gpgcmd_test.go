@@ -216,6 +216,67 @@ func TestGenKey(t *testing.T) {
 	}
 }
 
+// TestListKeysAfterGenKey: --list-keys must show the entity we just
+// generated, including the algorithm tag and the UID.
+func TestListKeysAfterGenKey(t *testing.T) {
+	t.Setenv("GNUPGHOME", t.TempDir())
+	runBag(t, nil, "--batch", "--quick-gen-key", "Carol <carol@x.io>", "ed25519")
+	exit, out, _ := runBag(t, nil, "--list-keys")
+	if exit != 0 {
+		t.Fatalf("list-keys exit=%d", exit)
+	}
+	for _, want := range []string{"ed25519", "Carol", "carol@x.io"} {
+		if !bytes.Contains(out, []byte(want)) {
+			t.Errorf("list-keys missing %q in output:\n%s", want, out)
+		}
+	}
+}
+
+// TestExportImportRoundTrip: bag --export | bag --import round-trips
+// the same key, AND system gpg can read what bag exports.
+func TestExportImportRoundTrip(t *testing.T) {
+	srcHome := t.TempDir()
+	t.Setenv("GNUPGHOME", srcHome)
+	runBag(t, nil, "--batch", "--quick-gen-key", "Dave <dave@x.io>", "ed25519")
+
+	// bag export armored.
+	exit, exported, er := runBag(t, nil, "--export", "-a", "dave")
+	if exit != 0 || len(exported) == 0 {
+		t.Fatalf("export exit=%d stderr=%s", exit, er)
+	}
+	if !bytes.Contains(exported, []byte("PGP PUBLIC KEY BLOCK")) {
+		t.Errorf("armored output missing header: %s", exported)
+	}
+
+	// bag-imported into a fresh home.
+	dstHome := t.TempDir()
+	t.Setenv("GNUPGHOME", dstHome)
+	exit, _, er = runBag(t, exported, "--import")
+	if exit != 0 {
+		t.Fatalf("import exit=%d stderr=%s", exit, er)
+	}
+	exit, out, _ := runBag(t, nil, "--list-keys")
+	if exit != 0 || !bytes.Contains(out, []byte("dave@x.io")) {
+		t.Errorf("re-listed keyring missing imported uid: %s", out)
+	}
+
+	gpg := systemGPG()
+	if gpg == "" {
+		return
+	}
+	// system gpg --import on bag's armored export.
+	dstSys := t.TempDir()
+	cmd := exec.Command(gpg, "--homedir", dstSys, "--import")
+	cmd.Stdin = bytes.NewReader(exported)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("system gpg --import: %v", err)
+	}
+	listed, _ := exec.Command(gpg, "--homedir", dstSys, "--list-keys").CombinedOutput()
+	if !bytes.Contains(listed, []byte("dave@x.io")) {
+		t.Errorf("system gpg can't list bag's exported uid: %s", listed)
+	}
+}
+
 // TestGenKeyDSARejected: --quick-gen-key dsa surfaces a clear error
 // (library limitation) instead of producing a corrupt keyring.
 func TestGenKeyDSARejected(t *testing.T) {
