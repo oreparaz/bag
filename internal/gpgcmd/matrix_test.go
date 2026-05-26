@@ -56,32 +56,63 @@ func TestMatrixEncryptDecrypt(t *testing.T) {
 	})
 
 	// Public-key matrix: key algo × armor × size, both directions.
+	//
+	// Keygen is the slow step (RSA-2048 under -race on macOS is several
+	// seconds), so each algo gets ONE keyring at the outer loop and
+	// every (armor × size) subtest reuses it via --homedir. This drops
+	// the public-key keygen count from 48 to 4.
 	t.Run("publickey", func(t *testing.T) {
 		for _, keyAlgo := range []string{"ed25519", "rsa2048", "ecdsa", "default"} {
-			for _, armored := range []bool{false, true} {
-				for _, sz := range sizes {
-					keyAlgo, armored, sz := keyAlgo, armored, sz
-					name := fmt.Sprintf("%s/armor=%v/%s", keyAlgo, armored, sz.name)
-					t.Run(name, func(t *testing.T) {
-						testPublicKeyRoundTrip(t, gpg, sz.data, keyAlgo, armored)
-					})
+			keyAlgo := keyAlgo
+			t.Run(keyAlgo, func(t *testing.T) {
+				home := matrixGenHome(t, keyAlgo, "Mat")
+				for _, armored := range []bool{false, true} {
+					for _, sz := range sizes {
+						armored, sz := armored, sz
+						name := fmt.Sprintf("armor=%v/%s", armored, sz.name)
+						t.Run(name, func(t *testing.T) {
+							testPublicKeyRoundTrip(t, gpg, home, sz.data, armored)
+						})
+					}
 				}
-			}
+			})
 		}
 	})
 
-	// Sign+verify matrix: key algo × sig style × direction.
+	// Sign+verify matrix: key algo × sig style × direction. Same
+	// keyring caching as publickey.
 	t.Run("signverify", func(t *testing.T) {
 		for _, keyAlgo := range []string{"ed25519", "rsa2048", "ecdsa"} {
-			for _, mode := range []string{"-s", "-b", "--clearsign"} {
-				keyAlgo, mode := keyAlgo, mode
-				name := fmt.Sprintf("%s/%s", keyAlgo, sigModeName(mode))
-				t.Run(name, func(t *testing.T) {
-					testSignVerifyRoundTrip(t, gpg, keyAlgo, mode)
-				})
-			}
+			keyAlgo := keyAlgo
+			t.Run(keyAlgo, func(t *testing.T) {
+				home := matrixGenHome(t, keyAlgo, "Sig")
+				for _, mode := range []string{"-s", "-b", "--clearsign"} {
+					mode := mode
+					t.Run(sigModeName(mode), func(t *testing.T) {
+						testSignVerifyRoundTrip(t, gpg, home, mode)
+					})
+				}
+			})
 		}
 	})
+}
+
+// matrixGenHome creates a fresh GnuPG home, generates a single key
+// with the given algorithm, and returns the home path. The caller is
+// responsible for passing --homedir to every gpg/bag invocation;
+// matrixGenHome deliberately does NOT call t.Setenv, so multiple
+// matrix branches can be active concurrently in the future.
+func matrixGenHome(t *testing.T, keyAlgo, role string) string {
+	t.Helper()
+	home := filepath.Join(t.TempDir(), "gnupg")
+	os.MkdirAll(home, 0o700)
+	uid := fmt.Sprintf("%s <%s@x.io>", role, keyAlgo)
+	exit, _, er := runBag(t, nil,
+		"--homedir", home, "--batch", "--quick-gen-key", uid, keyAlgo)
+	if exit != 0 {
+		t.Fatalf("matrix genkey %s %s: exit=%d stderr=%s", role, keyAlgo, exit, er)
+	}
+	return home
 }
 
 func testSymmetricRoundTrip(t *testing.T, gpg string, plain []byte, cipher string, armored bool) {
@@ -145,29 +176,19 @@ func testSymmetricRoundTrip(t *testing.T, gpg string, plain []byte, cipher strin
 	}
 }
 
-func testPublicKeyRoundTrip(t *testing.T, gpg string, plain []byte, keyAlgo string, armored bool) {
+func testPublicKeyRoundTrip(t *testing.T, gpg, home string, plain []byte, armored bool) {
 	t.Helper()
 	dir := t.TempDir()
-	home := filepath.Join(dir, "gnupg")
-	os.MkdirAll(home, 0o700)
-	t.Setenv("GNUPGHOME", home)
-
-	// bag generates a key.
-	uid := fmt.Sprintf("Mat <%s@x.io>", keyAlgo)
-	exit, _, er := runBag(t, nil, "--batch", "--quick-gen-key", uid, keyAlgo)
-	if exit != 0 {
-		t.Fatalf("genkey: exit=%d stderr=%s", exit, er)
-	}
 	plainFile := writeTempFile(t, dir, "p", plain)
 
 	// bag encrypts, system decrypts.
 	bagCipher := filepath.Join(dir, "bag.gpg")
-	encArgs := []string{"--batch", "--encrypt", "-r", "x.io"}
+	encArgs := []string{"--homedir", home, "--batch", "--encrypt", "-r", "x.io"}
 	if armored {
 		encArgs = append(encArgs, "-a")
 	}
 	encArgs = append(encArgs, "--output", bagCipher, plainFile)
-	exit, _, er = runBag(t, nil, encArgs...)
+	exit, _, er := runBag(t, nil, encArgs...)
 	if exit != 0 {
 		t.Fatalf("bag --encrypt: exit=%d stderr=%s", exit, er)
 	}
@@ -197,7 +218,8 @@ func testPublicKeyRoundTrip(t *testing.T, gpg string, plain []byte, keyAlgo stri
 	if err := exec.Command(gpg, encArgs2...).Run(); err != nil {
 		t.Fatalf("system encrypt: %v", err)
 	}
-	exit, got, er = runBag(t, nil, "-d", "--output", "-", gpgCipher)
+	exit, got, er = runBag(t, nil, "--homedir", home,
+		"-d", "--output", "-", gpgCipher)
 	if exit != 0 {
 		t.Fatalf("bag --decrypt: exit=%d stderr=%s", exit, er)
 	}
@@ -206,28 +228,20 @@ func testPublicKeyRoundTrip(t *testing.T, gpg string, plain []byte, keyAlgo stri
 	}
 }
 
-func testSignVerifyRoundTrip(t *testing.T, gpg, keyAlgo, mode string) {
+func testSignVerifyRoundTrip(t *testing.T, gpg, home, mode string) {
 	t.Helper()
 	dir := t.TempDir()
-	home := filepath.Join(dir, "gnupg")
-	os.MkdirAll(home, 0o700)
-	t.Setenv("GNUPGHOME", home)
-
-	uid := fmt.Sprintf("Sig <%s@x.io>", keyAlgo)
-	exit, _, er := runBag(t, nil, "--batch", "--quick-gen-key", uid, keyAlgo)
-	if exit != 0 {
-		t.Fatalf("genkey: %d %s", exit, er)
-	}
 	plain := []byte("matrix sign verify\n")
 	plainFile := writeTempFile(t, dir, "p", plain)
 
 	// bag signs, both sides verify.
 	bagSig := filepath.Join(dir, "bag.sig")
-	exit, _, er = runBag(t, nil, "--batch", mode, "-a", "--output", bagSig, plainFile)
+	exit, _, er := runBag(t, nil, "--homedir", home, "--batch",
+		mode, "-a", "--output", bagSig, plainFile)
 	if exit != 0 {
 		t.Fatalf("bag sign: %d %s", exit, er)
 	}
-	verifyArgs := []string{"--verify", bagSig}
+	verifyArgs := []string{"--homedir", home, "--verify", bagSig}
 	if mode == "-b" {
 		verifyArgs = append(verifyArgs, plainFile)
 	}
@@ -236,8 +250,12 @@ func testSignVerifyRoundTrip(t *testing.T, gpg, keyAlgo, mode string) {
 		t.Errorf("bag verify of bag's %s: exit=%d stderr=%s", mode, exit, er)
 	}
 
-	gpgArgs := append([]string{"--homedir", home, "--verify"}, verifyArgs[1:]...)
-	out, _ := exec.Command(gpg, gpgArgs...).CombinedOutput()
+	// For gpg, swap bag's own --homedir into the gpg flag spelling.
+	gpgVerifyArgs := []string{"--homedir", home, "--verify", bagSig}
+	if mode == "-b" {
+		gpgVerifyArgs = append(gpgVerifyArgs, plainFile)
+	}
+	out, _ := exec.Command(gpg, gpgVerifyArgs...).CombinedOutput()
 	if !bytes.Contains(out, []byte("Good signature")) {
 		t.Errorf("gpg verify of bag's %s:\n%s", mode, out)
 	}
@@ -249,7 +267,7 @@ func testSignVerifyRoundTrip(t *testing.T, gpg, keyAlgo, mode string) {
 	if err := exec.Command(gpg, signArgs...).Run(); err != nil {
 		t.Fatalf("gpg sign %s: %v", mode, err)
 	}
-	verifyArgs = []string{"--verify", gpgSig}
+	verifyArgs = []string{"--homedir", home, "--verify", gpgSig}
 	if mode == "-b" {
 		verifyArgs = append(verifyArgs, plainFile)
 	}
