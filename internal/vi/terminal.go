@@ -185,9 +185,14 @@ const (
 	ansiClearScreen = "\x1b[2J"
 	ansiHome        = "\x1b[H"
 	ansiClearLine   = "\x1b[K"
-	ansiHideCursor  = "\x1b[?25l"
-	ansiShowCursor  = "\x1b[?25h"
 	ansiReverse     = "\x1b[7m"
+	// DEC private mode 2026 — synchronized output. Wrapping a frame
+	// in begin/end lets the terminal present the whole update at once
+	// instead of revealing each cursor move, line clear, and re-paint
+	// individually. Cures the flicker on every keystroke. Terminals
+	// that don't recognise it ignore the sequence harmlessly.
+	ansiSyncBegin   = "\x1b[?2026h"
+	ansiSyncEnd     = "\x1b[?2026l"
 )
 
 // colorFor maps a SpanKind to an ANSI sequence.
@@ -207,11 +212,19 @@ func colorFor(k SpanKind) string {
 
 // render draws the editor onto w. It always paints a full screen frame,
 // which is fine for "small vi" sizes and avoids subtle redraw bugs.
+//
+// The frame is wrapped in DEC mode-2026 "synchronized output" so the
+// terminal presents the whole repaint atomically — that eliminates the
+// per-keystroke flicker caused by line-by-line cursor moves, clear-line
+// sequences, and the final cursor reposition all being visible mid-paint.
+// Terminals that don't implement mode 2026 ignore the sequence.
 func render(e *Editor, w io.Writer) {
 	bw := bufio.NewWriter(w)
 	defer bw.Flush()
 
-	bw.WriteString(ansiHideCursor)
+	bw.WriteString(ansiSyncBegin)
+	defer bw.WriteString(ansiSyncEnd)
+
 	bw.WriteString(ansiHome)
 
 	syntax := pickSyntax(e.File())
@@ -262,7 +275,6 @@ func render(e *Editor, w io.Writer) {
 		col = len(e.cmdline) + 2
 	}
 	bw.WriteString(fmt.Sprintf("\x1b[%d;%dH", row, col))
-	bw.WriteString(ansiShowCursor)
 }
 
 // writeColoredLine writes a single buffer line with span colors,
