@@ -21,6 +21,24 @@ func systemGPG() string {
 	return ""
 }
 
+// shortHome returns a GnuPG home directory under /tmp instead of
+// t.TempDir(). t.TempDir() on macOS uses $TMPDIR (typically a deep
+// path under /var/folders/...), and the resulting paths exceed the
+// sockaddr_un.sun_path limit (104 bytes on macOS), so gpg-agent fails
+// to bind its socket inside the home. Using /tmp (≤14 chars to the
+// socket) keeps every gpg subprocess working on all platforms.
+//
+// The directory is removed automatically when the test completes.
+func shortHome(t *testing.T) string {
+	t.Helper()
+	home, err := os.MkdirTemp("/tmp", "bag-gpg-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	return home
+}
+
 // runBag runs bag-gpg in-process. stdin / stdout / stderr are captured.
 func runBag(t *testing.T, stdin []byte, args ...string) (int, []byte, []byte) {
 	t.Helper()
@@ -190,7 +208,7 @@ func TestGenKey(t *testing.T) {
 	for _, algo := range []string{"rsa2048", "ed25519", "ecdsa", "default"} {
 		algo := algo
 		t.Run(algo, func(t *testing.T) {
-			home := t.TempDir()
+			home := shortHome(t)
 			t.Setenv("GNUPGHOME", home)
 			uid := fmt.Sprintf("Test %s <%s@example.com>", algo, algo)
 			exit, _, er := runBag(t, nil,
@@ -219,7 +237,7 @@ func TestGenKey(t *testing.T) {
 // TestListKeysAfterGenKey: --list-keys must show the entity we just
 // generated, including the algorithm tag and the UID.
 func TestListKeysAfterGenKey(t *testing.T) {
-	t.Setenv("GNUPGHOME", t.TempDir())
+	t.Setenv("GNUPGHOME", shortHome(t))
 	runBag(t, nil, "--batch", "--quick-gen-key", "Carol <carol@x.io>", "ed25519")
 	exit, out, _ := runBag(t, nil, "--list-keys")
 	if exit != 0 {
@@ -235,7 +253,7 @@ func TestListKeysAfterGenKey(t *testing.T) {
 // TestExportImportRoundTrip: bag --export | bag --import round-trips
 // the same key, AND system gpg can read what bag exports.
 func TestExportImportRoundTrip(t *testing.T) {
-	srcHome := t.TempDir()
+	srcHome := shortHome(t)
 	t.Setenv("GNUPGHOME", srcHome)
 	runBag(t, nil, "--batch", "--quick-gen-key", "Dave <dave@x.io>", "ed25519")
 
@@ -249,7 +267,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	}
 
 	// bag-imported into a fresh home.
-	dstHome := t.TempDir()
+	dstHome := shortHome(t)
 	t.Setenv("GNUPGHOME", dstHome)
 	exit, _, er = runBag(t, exported, "--import")
 	if exit != 0 {
@@ -265,7 +283,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 		return
 	}
 	// system gpg --import on bag's armored export.
-	dstSys := t.TempDir()
+	dstSys := shortHome(t)
 	cmd := exec.Command(gpg, "--homedir", dstSys, "--import")
 	cmd.Stdin = bytes.NewReader(exported)
 	if err := cmd.Run(); err != nil {
@@ -288,7 +306,7 @@ func TestPublicKeyRoundTrip(t *testing.T) {
 	plain := []byte("public-key encrypted hello\n")
 
 	// Phase 1: bag-only path.
-	homeAlice := t.TempDir()
+	homeAlice := shortHome(t)
 	t.Setenv("GNUPGHOME", homeAlice)
 	runBag(t, nil, "--batch", "--quick-gen-key", "Alice <alice@x.io>", "ed25519")
 	plainFile := filepath.Join(homeAlice, "msg.txt")
@@ -326,7 +344,7 @@ func TestPublicKeyRoundTrip(t *testing.T) {
 	}
 
 	// Phase 3: system gpg generates Bob; bag encrypts to him; system decrypts.
-	homeBob := t.TempDir()
+	homeBob := shortHome(t)
 	os.Chmod(homeBob, 0o700)
 	cmd = exec.Command(gpg, "--homedir", homeBob,
 		"--batch", "--pinentry-mode", "loopback", "--passphrase", "",
@@ -338,7 +356,7 @@ func TestPublicKeyRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("system gpg export: %v", err)
 	}
-	homeBag := t.TempDir()
+	homeBag := shortHome(t)
 	t.Setenv("GNUPGHOME", homeBag)
 	exit, _, er = runBag(t, exported, "--import")
 	if exit != 0 {
@@ -366,7 +384,7 @@ func TestPublicKeyRoundTrip(t *testing.T) {
 func TestSignVerifyRoundTrip(t *testing.T) {
 	gpg := systemGPG()
 	plain := []byte("important message\nthat must be signed\n")
-	home := t.TempDir()
+	home := shortHome(t)
 	t.Setenv("GNUPGHOME", home)
 	runBag(t, nil, "--batch", "--quick-gen-key", "Signer <s@x.io>", "ed25519")
 	plainFile := filepath.Join(home, "m")
@@ -470,7 +488,7 @@ type gpgArgs = []string
 // signed message; both bag and system gpg must recover the plaintext
 // AND verify the signature.
 func TestSignEncryptCombined(t *testing.T) {
-	home := t.TempDir()
+	home := shortHome(t)
 	t.Setenv("GNUPGHOME", home)
 	runBag(t, nil, "--batch", "--quick-gen-key", "Sender <sender@x.io>", "ed25519")
 	plain := []byte("sign+encrypt round trip\n")
@@ -514,7 +532,7 @@ func TestSignEncryptCombined(t *testing.T) {
 // TestDeleteKeys: --delete-secret-keys then --delete-keys removes a
 // UID from both keyrings, leaving the others intact.
 func TestDeleteKeys(t *testing.T) {
-	home := t.TempDir()
+	home := shortHome(t)
 	t.Setenv("GNUPGHOME", home)
 	runBag(t, nil, "--batch", "--quick-gen-key", "Keep <keep@x.io>", "ed25519")
 	runBag(t, nil, "--batch", "--quick-gen-key", "Drop <drop@x.io>", "ed25519")
@@ -553,7 +571,7 @@ func TestDeleteKeys(t *testing.T) {
 // TestGenKeyDSARejected: --quick-gen-key dsa surfaces a clear error
 // (library limitation) instead of producing a corrupt keyring.
 func TestGenKeyDSARejected(t *testing.T) {
-	t.Setenv("GNUPGHOME", t.TempDir())
+	t.Setenv("GNUPGHOME", shortHome(t))
 	exit, _, er := runBag(t, nil,
 		"--batch", "--quick-gen-key", "Test <x@y.com>", "dsa")
 	if exit == 0 {
@@ -667,7 +685,7 @@ func TestPrintMDMatchesSystem(t *testing.T) {
 // (we verify by exporting into a separate home, then running
 // show-keys against a third, empty home).
 func TestShowKeysFromFile(t *testing.T) {
-	srcHome := t.TempDir()
+	srcHome := shortHome(t)
 	t.Setenv("GNUPGHOME", srcHome)
 	exit, _, er := runBag(t, nil,
 		"--batch", "--quick-gen-key", "Show <show@x.io>", "rsa", "default", "0")
@@ -683,7 +701,7 @@ func TestShowKeysFromFile(t *testing.T) {
 
 	// New empty home: --show-keys must list without creating
 	// pubring.gpg / secring.gpg there.
-	emptyHome := t.TempDir()
+	emptyHome := shortHome(t)
 	t.Setenv("GNUPGHOME", emptyHome)
 	exit, out, er := runBag(t, nil, "--show-keys", keyPath)
 	if exit != 0 {
@@ -702,7 +720,7 @@ func TestShowKeysFromFile(t *testing.T) {
 // records in the documented colon format, with stable column count
 // (15) and the expected leading record types.
 func TestWithColonsListing(t *testing.T) {
-	t.Setenv("GNUPGHOME", t.TempDir())
+	t.Setenv("GNUPGHOME", shortHome(t))
 	exit, _, er := runBag(t, nil,
 		"--batch", "--quick-gen-key", "Col <col@x.io>", "rsa", "default", "0")
 	if exit != 0 {

@@ -104,8 +104,9 @@ func TestMatrixEncryptDecrypt(t *testing.T) {
 // matrix branches can be active concurrently in the future.
 func matrixGenHome(t *testing.T, keyAlgo, role string) string {
 	t.Helper()
-	home := filepath.Join(t.TempDir(), "gnupg")
-	os.MkdirAll(home, 0o700)
+	// shortHome lives under /tmp so the gpg-agent socket path stays
+	// under macOS's 104-char sun_path limit.
+	home := shortHome(t)
 	uid := fmt.Sprintf("%s <%s@x.io>", role, keyAlgo)
 	exit, _, er := runBag(t, nil,
 		"--homedir", home, "--batch", "--quick-gen-key", uid, keyAlgo)
