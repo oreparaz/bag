@@ -5,7 +5,7 @@
 FROM golang:1.22 AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
-COPY main.go main_test.go ./
+COPY main.go main_test.go sigpipe_unix.go sigpipe_other.go ./
 COPY internal/ internal/
 COPY test/ test/
 RUN CGO_ENABLED=0 go build -trimpath -o /out/bag ./
