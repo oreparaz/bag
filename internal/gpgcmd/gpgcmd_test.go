@@ -590,6 +590,91 @@ func fmtBytes(b []byte) string {
 	return fmt.Sprintf("%q", b)
 }
 
+// TestPassphraseProtectedKeyRoundTrip exercises the full sign/decrypt
+// flow on a passphrase-locked secret key. We generate the key with
+// bag (passphrase set via --passphrase), then:
+//
+//  1. bag encrypts to it and bag decrypts (with --passphrase-fd 0)
+//  2. system gpg encrypts to it (--trust-model always) and bag decrypts
+//  3. bag signs (passphrase via fd) and bag + system gpg both verify
+//
+// The point is to catch regressions in passphrase routing — early
+// versions of bag's decrypt prompt swallowed the test's stdin
+// redirection (the fd-0 bypass bug), and that would silently break
+// every real user with a locked secret key.
+func TestPassphraseProtectedKeyRoundTrip(t *testing.T) {
+	home := shortHome(t)
+	t.Setenv("GNUPGHOME", home)
+	pass := "open sesame"
+	exit, _, er := runBag(t, nil,
+		"--batch", "--passphrase", pass,
+		"--quick-gen-key", "Locked <locked@x.io>", "ed25519")
+	if exit != 0 {
+		t.Fatalf("gen locked key: exit=%d stderr=%s", exit, er)
+	}
+
+	plain := []byte("locked secret key plaintext\n")
+	dir := t.TempDir()
+	plainFile := filepath.Join(dir, "p")
+	os.WriteFile(plainFile, plain, 0o600)
+
+	// (1) bag encrypts → bag decrypts (with passphrase-fd).
+	bagCipher := filepath.Join(dir, "bag.gpg")
+	exit, _, er = runBag(t, nil, "--batch", "--encrypt", "-r", "locked",
+		"--output", bagCipher, plainFile)
+	if exit != 0 {
+		t.Fatalf("bag encrypt: exit=%d stderr=%s", exit, er)
+	}
+	exit, got, er := runBag(t, []byte(pass+"\n"),
+		"--batch", "--passphrase-fd", "0", "-d", "--output", "-", bagCipher)
+	if exit != 0 {
+		t.Fatalf("bag decrypt locked: exit=%d stderr=%s", exit, er)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Errorf("locked bag→bag mismatch: got %q", got)
+	}
+
+	// (2) system gpg interop. Trust-model always so gpg accepts the
+	// (no-trustdb) recipient.
+	gpg := systemGPG()
+	if gpg != "" {
+		gpgCipher := filepath.Join(dir, "gpg.gpg")
+		cmd := exec.Command(gpg, "--homedir", home, "--batch",
+			"--pinentry-mode", "loopback", "--trust-model", "always",
+			"--encrypt", "-r", "locked", "--output", gpgCipher, plainFile)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("system gpg encrypt: %v\n%s", err, out)
+		}
+		exit, got, er = runBag(t, []byte(pass+"\n"),
+			"--batch", "--passphrase-fd", "0", "-d", "--output", "-", gpgCipher)
+		if exit != 0 {
+			t.Fatalf("bag decrypt gpg-locked: exit=%d stderr=%s", exit, er)
+		}
+		if !bytes.Equal(got, plain) {
+			t.Errorf("locked gpg→bag mismatch: got %q", got)
+		}
+	}
+
+	// (3) bag signs with passphrase via fd; bag + system verify.
+	bagSig := filepath.Join(dir, "bag.sig")
+	exit, _, er = runBag(t, []byte(pass+"\n"),
+		"--batch", "--passphrase-fd", "0", "-s", "-a",
+		"--output", bagSig, plainFile)
+	if exit != 0 {
+		t.Fatalf("bag sign locked: exit=%d stderr=%s", exit, er)
+	}
+	exit, _, er = runBag(t, nil, "--verify", bagSig)
+	if exit != 0 || !bytes.Contains(er, []byte("Good signature")) {
+		t.Errorf("bag verify of locked-sig: exit=%d stderr=%s", exit, er)
+	}
+	if gpg != "" {
+		out, _ := exec.Command(gpg, "--homedir", home, "--verify", bagSig).CombinedOutput()
+		if !bytes.Contains(out, []byte("Good signature")) {
+			t.Errorf("gpg verify of bag's locked-sig:\n%s", out)
+		}
+	}
+}
+
 // TestEnarmorDearmorRoundTrip wraps and unwraps a binary payload via
 // bag's --enarmor / --dearmor, then confirms that gpg --dearmor reads
 // the same envelope. This is pure framing — no crypto — but it's
