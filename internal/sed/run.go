@@ -41,7 +41,8 @@ type address struct {
 }
 
 type command struct {
-	op    byte    // 's', 'd', 'p', 'q', 'y', '{'
+	op    byte    // 's', 'd', 'p', 'q', 'y', '{', ':', 'b', 't', 'T',
+	//                'n', 'N', 'D', 'P', 'h', 'H', 'g', 'G', 'x', '='
 	addr1 address
 	addr2 address // zero kind = single
 	negate bool
@@ -57,6 +58,9 @@ type command struct {
 	// block-specific ('{'): contained commands executed when the
 	// address(es) match.
 	children []command
+
+	// ':', 'b', 't', 'T': label name (target for branches, definition for ':').
+	label string
 }
 
 type subFlags struct {
@@ -157,26 +161,18 @@ func processOne(name string, cmds []command, o *options) error {
 		return err
 	}
 
-	st := &state{rangeOpen: make([]bool, countAllCmds(cmds))}
-	total := len(all)
-	for i, line := range all {
-		ln := i + 1
-		isLast := ln == total
-		ps := line // pattern space; commands may modify
-		printDefault := !o.suppress
-		idxNext := 0
-		ps2, deleted, quit := runCmds(cmds, ps, ln, isLast, st, &idxNext, out)
-		ps = ps2
-		// q quits after still emitting the current pattern space (matching
-		// GNU sed). Auto-print fires unless -n or `d` suppressed it.
-		if !deleted && printDefault {
-			out.WriteString(ps)
-			out.WriteByte('\n')
-		}
-		if quit {
-			break
-		}
+	prog, err := compileProgram(cmds)
+	if err != nil {
+		return err
 	}
+	rs := &runner{
+		prog:         prog,
+		lines:        all,
+		out:          out,
+		printDefault: !o.suppress,
+		rangeOpen:    make([]bool, len(prog.insns)),
+	}
+	rs.runAll()
 
 	// Backup + rename for in-place.
 	if o.inPlace && tmpPath != "" {
@@ -220,41 +216,23 @@ func readAllLines(r io.Reader) ([]string, error) {
 	}
 }
 
-func addressMatches(c command, line int, isLast bool, content string, ci int, st *state) bool {
-	if c.addr1.kind == addrNone {
-		return !c.negate
-	}
-	hit1 := matchAddr(c.addr1, line, isLast, content)
-	if c.addr2.kind == addrNone {
-		if c.negate {
-			return !hit1
-		}
-		return hit1
-	}
-	// Range
-	if !st.rangeOpen[ci] {
-		if hit1 {
-			st.rangeOpen[ci] = true
-		}
-	}
-	in := st.rangeOpen[ci]
-	if in && matchAddr(c.addr2, line, isLast, content) {
-		st.rangeOpen[ci] = false
-	}
-	if c.negate {
-		return !in
-	}
-	return in
-}
 
-func matchAddr(a address, line int, isLast bool, content string) bool {
+func matchAddr(a address, line int, isLast bool, content string, lastRE *regexp.Regexp) bool {
 	switch a.kind {
 	case addrLine:
 		return a.line == line
 	case addrLast:
 		return isLast
 	case addrRegex:
-		return a.re.MatchString(content)
+		re := a.re
+		if re == nil {
+			// `//` — fall back to most recent regex per GNU sed.
+			re = lastRE
+			if re == nil {
+				return false
+			}
+		}
+		return re.MatchString(content)
 	}
 	return false
 }
@@ -263,81 +241,346 @@ func matchAddr(a address, line int, isLast bool, content string) bool {
 // (potentially nested) tree, so the range-state vector is large
 // enough to hold one slot per command. Each top-level command and
 // each child gets its own slot, assigned in pre-order.
-func countAllCmds(cmds []command) int {
-	n := 0
-	for _, c := range cmds {
-		n++
-		if c.op == '{' {
-			n += countAllCmds(c.children)
-		}
-	}
-	return n
+// instruction is a single executable step in the compiled program.
+type instruction struct {
+	cmd    command
+	target int // for b/t/T: index of target label, or -1 to branch to end
+	skipTo int // for '{': index past the matching block end
 }
 
-// runCmds executes a list of commands on ps. It threads a monotonically
-// increasing command index (used as the key into st.rangeOpen) so each
-// nested command has a stable slot for address-range state. Returns the
-// (possibly mutated) pattern space and the deleted/quit signals.
-func runCmds(cmds []command, ps string, ln int, isLast bool, st *state, idxNext *int, out *bufio.Writer) (string, bool, bool) {
-	deleted := false
-	quit := false
-	for _, c := range cmds {
-		ci := *idxNext
-		*idxNext++
-		if !addressMatches(c, ln, isLast, ps, ci, st) {
-			// Even when the address skips this command, we still need
-			// to advance over any nested children so subsequent
-			// commands keep their stable indices.
-			if c.op == '{' {
-				skipCmds(c.children, idxNext)
+type program struct {
+	insns []instruction
+}
+
+// compileProgram flattens the AST into a linear instruction list with
+// labels resolved to PC indices and `{}` blocks resolved to a skip-target.
+// This makes branching (b/t/T) and block-skipping a single PC assignment
+// during execution.
+func compileProgram(cmds []command) (*program, error) {
+	p := &program{}
+	labels := map[string]int{}
+	type pending struct {
+		from  int
+		label string
+	}
+	var pendings []pending
+
+	var walk func(cs []command) error
+	walk = func(cs []command) error {
+		for _, c := range cs {
+			ix := len(p.insns)
+			p.insns = append(p.insns, instruction{cmd: c, target: -1, skipTo: -1})
+			switch c.op {
+			case '{':
+				if err := walk(c.children); err != nil {
+					return err
+				}
+				p.insns[ix].skipTo = len(p.insns)
+			case ':':
+				if _, dup := labels[c.label]; dup {
+					return fmt.Errorf("sed: duplicate label %q", c.label)
+				}
+				labels[c.label] = ix
+			case 'b', 't', 'T':
+				if c.label != "" {
+					pendings = append(pendings, pending{from: ix, label: c.label})
+				}
+				// empty label keeps target == -1 (branch to end of script).
 			}
+		}
+		return nil
+	}
+	if err := walk(cmds); err != nil {
+		return nil, err
+	}
+	for _, pn := range pendings {
+		tgt, ok := labels[pn.label]
+		if !ok {
+			return nil, fmt.Errorf("sed: undefined label %q", pn.label)
+		}
+		p.insns[pn.from].target = tgt
+	}
+	return p, nil
+}
+
+// runner executes a compiled program over a sequence of input lines,
+// supporting GNU sed's pattern/hold spaces and branching.
+type runner struct {
+	prog  *program
+	lines []string
+
+	// lineIx is the index of the NEXT line to read into pattern space.
+	lineIx int
+
+	// pattern space + hold space.
+	ps string
+	hs string
+
+	// subSuccess tracks whether the last `s` command on the current cycle
+	// produced a substitution (cleared by reading input or by `t`/`T`).
+	subSuccess bool
+
+	// lastRE is the most recently used (address or `s`) regex. An empty
+	// pattern in `s` or `/RE/` falls back to this — matches GNU sed.
+	lastRE *regexp.Regexp
+
+	out          *bufio.Writer
+	printDefault bool
+
+	// rangeOpen tracks whether each command's addr1..addr2 range is open.
+	rangeOpen []bool
+
+	// per-cycle:
+	lineNo  int
+	isLast  bool
+	deleted bool
+	quit    bool
+	// appended is the text queued by `a` commands for emission AFTER
+	// auto-print at end of cycle.
+	appended []string
+}
+
+// readLine pulls the next line into the pattern space. Returns false if
+// input was exhausted.
+func (r *runner) readLine() bool {
+	if r.lineIx >= len(r.lines) {
+		return false
+	}
+	r.ps = r.lines[r.lineIx]
+	r.lineIx++
+	r.lineNo = r.lineIx
+	r.isLast = r.lineIx >= len(r.lines)
+	r.subSuccess = false
+	return true
+}
+
+// runAll drives the input loop: read a line, execute the program, auto-
+// print, flush any queued `a` text, repeat.
+func (r *runner) runAll() {
+	for !r.quit && r.readLine() {
+		r.deleted = false
+		r.appended = r.appended[:0]
+		r.execProgram()
+		if !r.deleted && r.printDefault {
+			r.out.WriteString(r.ps)
+			r.out.WriteByte('\n')
+		}
+		for _, t := range r.appended {
+			r.out.WriteString(t)
+			r.out.WriteByte('\n')
+		}
+	}
+}
+
+// execProgram runs the program once over the current pattern space.
+func (r *runner) execProgram() {
+	pc := 0
+	for pc < len(r.prog.insns) {
+		ins := &r.prog.insns[pc]
+		c := ins.cmd
+		if !r.addressMatchesIdx(c, pc) {
+			if c.op == '{' {
+				pc = ins.skipTo
+				continue
+			}
+			pc++
 			continue
 		}
 		switch c.op {
 		case 's':
-			var didMatch bool
-			ps2, m := applySub(ps, c)
-			ps, didMatch = ps2, m
-			if c.subFlags.print && didMatch {
-				out.WriteString(ps)
-				out.WriteByte('\n')
+			re := c.subRE
+			if re == nil {
+				re = r.lastRE
+			}
+			ps2, m := applySub(r.ps, c, re)
+			r.ps = ps2
+			if m {
+				r.subSuccess = true
+				r.noteRE(re)
+				if c.subFlags.print {
+					r.out.WriteString(r.ps)
+					r.out.WriteByte('\n')
+				}
 			}
 		case 'y':
-			ps = applyY(ps, c.yMap)
+			r.ps = applyY(r.ps, c.yMap)
 		case 'd':
-			deleted = true
+			r.deleted = true
+			return
+		case 'D':
+			i := strings.IndexByte(r.ps, '\n')
+			if i < 0 {
+				r.deleted = true
+				return
+			}
+			r.ps = r.ps[i+1:]
+			r.subSuccess = false
+			pc = 0
+			continue
 		case 'p':
-			out.WriteString(ps)
-			out.WriteByte('\n')
+			r.out.WriteString(r.ps)
+			r.out.WriteByte('\n')
+		case 'P':
+			i := strings.IndexByte(r.ps, '\n')
+			if i < 0 {
+				r.out.WriteString(r.ps)
+			} else {
+				r.out.WriteString(r.ps[:i])
+			}
+			r.out.WriteByte('\n')
 		case 'q':
-			quit = true
+			r.quit = true
+			return
+		case 'n':
+			// Print current ps (unless -n), then read next line.
+			if r.printDefault && !r.deleted {
+				r.out.WriteString(r.ps)
+				r.out.WriteByte('\n')
+			}
+			if !r.readLine() {
+				r.quit = true
+				return
+			}
+		case 'N':
+			if r.lineIx >= len(r.lines) {
+				// GNU sed: no more input — exit normal cycle (auto-print
+				// fires from runAll).
+				return
+			}
+			r.ps += "\n" + r.lines[r.lineIx]
+			r.lineIx++
+			r.lineNo = r.lineIx
+			r.isLast = r.lineIx >= len(r.lines)
+		case 'h':
+			r.hs = r.ps
+		case 'H':
+			if r.hs == "" {
+				r.hs = "\n" + r.ps
+			} else {
+				r.hs = r.hs + "\n" + r.ps
+			}
+		case 'g':
+			r.ps = r.hs
+		case 'G':
+			if r.ps == "" {
+				r.ps = "\n" + r.hs
+			} else {
+				r.ps = r.ps + "\n" + r.hs
+			}
+		case 'x':
+			r.ps, r.hs = r.hs, r.ps
+		case '=':
+			fmt.Fprintln(r.out, r.lineNo)
+		case 'a':
+			r.appended = append(r.appended, c.label)
+		case 'r':
+			// Read FILE and append its contents after auto-print.
+			data, err := os.ReadFile(c.label)
+			if err == nil {
+				s := string(data)
+				// Drop a single trailing \n so the appended block
+				// doesn't add an extra blank line — GNU sed behavior.
+				s = strings.TrimSuffix(s, "\n")
+				r.appended = append(r.appended, s)
+			}
+			// Missing file is silently ignored, per GNU sed.
+		case 'i':
+			r.out.WriteString(c.label)
+			r.out.WriteByte('\n')
+		case 'c':
+			// Change: delete pattern space, output text at end of cycle
+			// (only on the last line of a matched range). Simplified
+			// implementation: output the text on every matching line and
+			// delete the pattern space. (Matches GNU when no range.)
+			r.appended = append(r.appended, c.label)
+			r.deleted = true
+			return
+		case ':':
+			// no-op: label marker.
+		case 'b':
+			if ins.target < 0 {
+				return
+			}
+			pc = ins.target + 1
+			continue
+		case 't':
+			if r.subSuccess {
+				r.subSuccess = false
+				if ins.target < 0 {
+					return
+				}
+				pc = ins.target + 1
+				continue
+			}
+		case 'T':
+			if !r.subSuccess {
+				if ins.target < 0 {
+					return
+				}
+				pc = ins.target + 1
+				continue
+			}
+			r.subSuccess = false
 		case '{':
-			var d, q bool
-			ps, d, q = runCmds(c.children, ps, ln, isLast, st, idxNext, out)
-			if d {
-				deleted = true
-			}
-			if q {
-				quit = true
-			}
+			// Block-start: address matched; fall through into children.
 		}
-		if deleted || quit {
-			// Drain remaining index slots so any sibling commands
-			// that don't run still own the correct future slots.
-			break
-		}
+		pc++
 	}
-	return ps, deleted, quit
 }
 
-// skipCmds advances *idxNext past a block's children without
-// executing them.
-func skipCmds(cmds []command, idxNext *int) {
-	for _, c := range cmds {
-		*idxNext++
-		if c.op == '{' {
-			skipCmds(c.children, idxNext)
+// addressMatchesIdx is the address gate using a flat PC index for range
+// state. Threaded with lastRE so empty `//` addresses can fall back to
+// the most recent regex.
+func (r *runner) addressMatchesIdx(c command, pc int) bool {
+	matched := r.addrMatchesFlat(c, pc)
+	if c.negate {
+		return !matched
+	}
+	return matched
+}
+
+func (r *runner) addrMatchesFlat(c command, pc int) bool {
+	// No address → always matches.
+	if c.addr1.kind == addrNone {
+		return true
+	}
+	if c.addr2.kind == addrNone {
+		hit := matchAddr(c.addr1, r.lineNo, r.isLast, r.ps, r.lastRE)
+		if hit && c.addr1.kind == addrRegex {
+			r.noteRE(c.addr1.re)
 		}
+		return hit
+	}
+	// Range address: open on first match, close on second.
+	if r.rangeOpen[pc] {
+		if matchAddr(c.addr2, r.lineNo, r.isLast, r.ps, r.lastRE) {
+			r.rangeOpen[pc] = false
+			if c.addr2.kind == addrRegex {
+				r.noteRE(c.addr2.re)
+			}
+		}
+		return true
+	}
+	if matchAddr(c.addr1, r.lineNo, r.isLast, r.ps, r.lastRE) {
+		if c.addr1.kind == addrRegex {
+			r.noteRE(c.addr1.re)
+		}
+		// If the close address is a number ≤ current line, this is a
+		// single-line range (matches GNU sed).
+		if c.addr2.kind == addrLine && c.addr2.line <= r.lineNo {
+			return true
+		}
+		r.rangeOpen[pc] = true
+		return true
+	}
+	return false
+}
+
+// noteRE records a matched regex as the "last regex" so empty `//` and
+// `s//.../` references can reuse it.
+func (r *runner) noteRE(re *regexp.Regexp) {
+	if re != nil {
+		r.lastRE = re
 	}
 }
 
@@ -362,15 +605,18 @@ func applyY(line string, m map[rune]rune) string {
 // applySub returns the (possibly rewritten) line and whether any
 // substitution was actually performed. The caller needs the latter so
 // `s///p` only prints when there was a real match (matching GNU sed).
-func applySub(line string, c command) (string, bool) {
-	if c.subRE == nil {
+//
+// re is the regex to use — caller resolves a nil c.subRE to the runner's
+// lastRE before calling.
+func applySub(line string, c command, re *regexp.Regexp) (string, bool) {
+	if re == nil {
 		return line, false
 	}
 	if c.subFlags.global {
 		matched := false
-		out := c.subRE.ReplaceAllStringFunc(line, func(m string) string {
+		out := re.ReplaceAllStringFunc(line, func(m string) string {
 			matched = true
-			return expandReplacement(c.subRepl, c.subRE, m)
+			return expandReplacement(c.subRepl, re, m)
 		})
 		return out, matched
 	}
@@ -378,22 +624,22 @@ func applySub(line string, c command) (string, bool) {
 		n := c.subFlags.nth
 		count := 0
 		matched := false
-		out := c.subRE.ReplaceAllStringFunc(line, func(m string) string {
+		out := re.ReplaceAllStringFunc(line, func(m string) string {
 			count++
 			if count != n {
 				return m
 			}
 			matched = true
-			return expandReplacement(c.subRepl, c.subRE, m)
+			return expandReplacement(c.subRepl, re, m)
 		})
 		return out, matched
 	}
 	// First match only.
-	loc := c.subRE.FindStringSubmatchIndex(line)
+	loc := re.FindStringSubmatchIndex(line)
 	if loc == nil {
 		return line, false
 	}
-	return line[:loc[0]] + expandReplacement(c.subRepl, c.subRE, line[loc[0]:loc[1]]) + line[loc[1]:], true
+	return line[:loc[0]] + expandReplacement(c.subRepl, re, line[loc[0]:loc[1]]) + line[loc[1]:], true
 }
 
 // expandReplacement handles & and \1..\9 references.
@@ -432,35 +678,40 @@ func expandReplacement(repl string, re *regexp.Regexp, match string) string {
 	return b.String()
 }
 
-// parseScripts joins multiple -e scripts, splits on `;` and newline at the
-// top level, and parses each part into a command.
+// parseScripts joins multiple -e scripts (with a newline between each,
+// matching GNU sed), splits the result on `;` and newline at the top
+// level, and parses each command. Joining matters because block syntax
+// like `-e '1{' -e 'cmd' -e '}'` spans multiple -e arguments.
 func parseScripts(scripts []string, extended bool) ([]command, error) {
+	joined := strings.Join(scripts, "\n")
 	var out []command
-	for _, s := range scripts {
-		// Split on newline, but s/// can't contain raw newlines anyway.
-		for _, line := range splitTopLevel(s) {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			c, err := parseCommand(line, extended)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, c)
+	for _, line := range splitTopLevel(joined) {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
 		}
+		c, err := parseCommand(line, extended)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
 	}
 	return out, nil
 }
 
 // splitTopLevel splits on ; and newline at the top level (depth 0),
 // but skips delimiters that appear inside an s/// body, a y/// body,
-// or a `{ ... }` block. Returns the list of top-level commands.
+// a `/regex/` address, or a `{ ... }` block. Returns the list of
+// top-level commands.
 func splitTopLevel(s string) []string {
 	var out []string
 	var buf strings.Builder
 	braceDepth := 0
 	i := 0
+	// atCmdStart tracks whether the next non-whitespace byte begins a new
+	// command (so a `/` there starts an address rather than being a stray
+	// character).
+	atCmdStart := true
 	for i < len(s) {
 		c := s[i]
 		// Top-level separator only at depth 0.
@@ -468,15 +719,71 @@ func splitTopLevel(s string) []string {
 			out = append(out, buf.String())
 			buf.Reset()
 			i++
+			atCmdStart = true
 			continue
 		}
-		// `{` and `}` adjust depth. We keep them in the buffer so the
-		// surrounding command body contains the whole block; parseCommand
-		// recurses into it.
+		// Skip leading whitespace without changing the at-cmd-start flag.
+		if (c == ' ' || c == '\t') && buf.Len() == 0 {
+			i++
+			continue
+		}
+		// Regex address `/RE/` (or `\cREc`) at command start — scan past
+		// the closing delimiter, tracking `[...]` so a delimiter inside a
+		// bracket expression doesn't close the regex early. Brace chars
+		// inside a regex must NOT affect block depth.
+		if atCmdStart && c == '/' {
+			buf.WriteByte(c)
+			i++
+			inClass := false
+			for i < len(s) {
+				cc := s[i]
+				if cc == '\\' && i+1 < len(s) {
+					buf.WriteByte(cc)
+					buf.WriteByte(s[i+1])
+					i += 2
+					continue
+				}
+				if !inClass && cc == '[' {
+					inClass = true
+					buf.WriteByte(cc)
+					i++
+					// Leading `]` or `^]` are literal class members.
+					if i < len(s) && s[i] == ']' {
+						buf.WriteByte(']')
+						i++
+					} else if i+1 < len(s) && s[i] == '^' && s[i+1] == ']' {
+						buf.WriteByte('^')
+						buf.WriteByte(']')
+						i += 2
+					}
+					continue
+				}
+				if inClass && cc == ']' {
+					inClass = false
+					buf.WriteByte(cc)
+					i++
+					continue
+				}
+				if !inClass && cc == '/' {
+					buf.WriteByte(cc)
+					i++
+					break
+				}
+				buf.WriteByte(cc)
+				i++
+			}
+			atCmdStart = false
+			continue
+		}
+		// `{` and `}` adjust block depth ONLY at the command position
+		// (not inside an address — handled above). We keep them in the
+		// buffer so the surrounding command body contains the whole
+		// block; parseCommand recurses into it.
 		if c == '{' {
 			braceDepth++
 			buf.WriteByte(c)
 			i++
+			atCmdStart = true
 			continue
 		}
 		if c == '}' {
@@ -490,16 +797,58 @@ func splitTopLevel(s string) []string {
 			if braceDepth == 0 {
 				out = append(out, buf.String())
 				buf.Reset()
+				atCmdStart = true
 			}
 			continue
 		}
-		// If we hit a 's' or 'y' command at top level, scan until we've
-		// seen 3 unescaped occurrences of the delimiter.
+		// a/i/c with multi-line text. Recognise after we've consumed any
+		// addresses (which were handled by the regex branch above). The
+		// text payload ends at the first newline that isn't preceded by
+		// a `\` (line-continuation in classic GNU syntax).
+		if (c == 'a' || c == 'i' || c == 'c') && i+1 <= len(s) && braceDepth == 0 {
+			// Disambiguate from a stray 'a' inside another command's body
+			// — only accept if either the previous bufferred command is
+			// empty/address-only AND the next char is `\` or whitespace.
+			next := byte(' ')
+			if i+1 < len(s) {
+				next = s[i+1]
+			}
+			if next == '\\' || next == ' ' || next == '\t' || next == '\n' {
+				buf.WriteByte(c)
+				i++
+				// Consume the rest of the body until an unescaped \n
+				// outside braces. The first character may be `\` which
+				// will then be followed by an embedded `\n` belonging to
+				// the text.
+				for i < len(s) {
+					cc := s[i]
+					if cc == '\\' && i+1 < len(s) {
+						buf.WriteByte(cc)
+						buf.WriteByte(s[i+1])
+						i += 2
+						continue
+					}
+					if cc == '\n' {
+						// Unescaped newline — end of a/i/c body.
+						break
+					}
+					buf.WriteByte(cc)
+					i++
+				}
+				// Don't consume the newline; the outer split will do it.
+				atCmdStart = false
+				continue
+			}
+		}
+		// If we hit a 's' or 'y' command, scan until we've seen 3
+		// unescaped occurrences of the delimiter. Brackets inside the
+		// regex are tracked so `s:[/]:X:` doesn't close on the inner /.
 		if (c == 's' || c == 'y') && looksLikeSubAt(s, i) {
 			delim := s[i+1]
 			buf.WriteByte(c)
 			i++
 			delims := 0
+			inClass := false
 			for i < len(s) && delims < 3 {
 				cc := s[i]
 				if cc == '\\' && i+1 < len(s) {
@@ -508,22 +857,30 @@ func splitTopLevel(s string) []string {
 					i += 2
 					continue
 				}
-				if cc == delim {
+				if delims == 0 { // bracket tracking only during the regex
+					if !inClass && cc == '[' {
+						inClass = true
+					} else if inClass && cc == ']' {
+						inClass = false
+					}
+				}
+				if !inClass && cc == delim {
 					delims++
 				}
 				buf.WriteByte(cc)
 				i++
 			}
-			// After the 3rd delimiter, consume flags until a separator
-			// (or a brace at depth 0).
+			// After the 3rd delimiter, consume flags until a separator.
 			for i < len(s) && s[i] != ';' && s[i] != '\n' && s[i] != '}' {
 				buf.WriteByte(s[i])
 				i++
 			}
+			atCmdStart = false
 			continue
 		}
 		buf.WriteByte(c)
 		i++
+		atCmdStart = false
 	}
 	if buf.Len() > 0 {
 		out = append(out, buf.String())
@@ -611,12 +968,60 @@ func parseCommand(s string, extended bool) (command, error) {
 			return c, err
 		}
 		c.children = children
-	case 'd', 'p', 'q':
+	case ':':
+		// Label definition. The label is the rest of the line (whitespace
+		// stripped). Labels can't have addresses in real sed, but we don't
+		// enforce that.
+		c.label = strings.TrimSpace(body)
+		if c.label == "" {
+			return c, errors.New(": requires a label name")
+		}
+	case 'b', 't', 'T':
+		// Branch (unconditional, on-success, on-failure). Empty label
+		// means branch to end of script.
+		c.label = strings.TrimSpace(body)
+	case 'r':
+		// Read file: append its contents after the current cycle.
+		// The whole rest-of-line (after stripping leading whitespace) is
+		// the filename.
+		c.label = strings.TrimSpace(body)
+		if c.label == "" {
+			return c, errors.New("r requires a filename")
+		}
+	case 'a', 'i', 'c':
+		// Append / insert / change. Both forms accepted:
+		//   a\<NL>TEXT         (classic; backslash separates command
+		//                       from text, text on next line)
+		//   a\TEXT             (text directly after the backslash)
+		//   a TEXT             (GNU extension, space separates)
+		// Multi-line continuation via trailing backslash is recognised
+		// (the newline-joined trailing text becomes the payload).
+		c.label = parseACIText(body)
+	case 'd', 'p', 'q', 'n', 'N', 'D', 'P', 'h', 'H', 'g', 'G', 'x', '=':
 		// no-op (or trailing whitespace)
 	default:
-		return c, fmt.Errorf("unsupported command %q (only s, y, d, p, q, { } implemented)", string(c.op))
+		return c, fmt.Errorf("unsupported command %q", string(c.op))
 	}
 	return c, nil
+}
+
+// parseACIText turns the body following an a/i/c command into the
+// payload text. Strips the leading `\` or space separator (and the
+// newline that follows it in the classic form) and processes `\<NL>`
+// continuation lines.
+func parseACIText(body string) string {
+	s := body
+	if len(s) > 0 && (s[0] == '\\' || s[0] == ' ' || s[0] == '\t') {
+		s = s[1:]
+	}
+	// In the classic `a\<NL>text` form, the newline right after the
+	// backslash is the command/text separator — drop it.
+	s = strings.TrimPrefix(s, "\n")
+	// Backslash-continuation: `\<NL>` joins lines verbatim.
+	s = strings.ReplaceAll(s, "\\\n", "\n")
+	// Bare trailing backslash leaves no text.
+	s = strings.TrimSuffix(s, "\\")
+	return s
 }
 
 // parseY parses y/SRC/DST/ — a per-character transliteration table.
@@ -628,11 +1033,11 @@ func parseY(c *command, body string) error {
 	}
 	delim := body[0]
 	rest := body[1:]
-	src, rest, ok := scanSubField(rest, delim)
+	src, rest, ok := scanSubField(rest, delim, false)
 	if !ok {
 		return errors.New("unterminated y src")
 	}
-	dst, _, ok := scanSubField(rest, delim)
+	dst, _, ok := scanSubField(rest, delim, false)
 	if !ok {
 		return errors.New("unterminated y dst")
 	}
@@ -759,6 +1164,29 @@ func compileSedRE(pat string, extended bool) (*regexp.Regexp, error) {
 			// metacharacters.
 			out.WriteByte('\\')
 			out.WriteByte(c)
+		case '$':
+			// BRE's `$` is an anchor only at end-of-pattern (or right
+			// before `\)`). Anywhere else it's literal. RE2 treats `$`
+			// as an anchor in any position, so escape interior ones.
+			if i == len(pat)-1 {
+				out.WriteByte('$')
+			} else if i+1 < len(pat) && pat[i+1] == '\\' &&
+				i+2 < len(pat) && pat[i+2] == ')' {
+				out.WriteByte('$')
+			} else {
+				out.WriteString(`\$`)
+			}
+		case '^':
+			// Symmetric: BRE's `^` is an anchor only at start (or after
+			// `\(`); elsewhere literal. RE2 treats it as start-anchor
+			// anywhere; escape interior ones.
+			if i == 0 {
+				out.WriteByte('^')
+			} else if i >= 2 && pat[i-2] == '\\' && pat[i-1] == '(' {
+				out.WriteByte('^')
+			} else {
+				out.WriteString(`\^`)
+			}
 		default:
 			out.WriteByte(c)
 		}
@@ -788,14 +1216,35 @@ func parseAddress(s string, extended bool) (string, address, error) {
 		return s[j:], address{kind: addrLine, line: n}, nil
 	}
 	if s[0] == '/' {
-		// Find unescaped closing slash.
+		// Find unescaped closing slash. Brackets `[...]` are tracked so a
+		// `/` inside a character class doesn't close the regex early.
 		j := 1
+		inClass := false
 		for j < len(s) {
 			if s[j] == '\\' && j+1 < len(s) {
 				j += 2
 				continue
 			}
-			if s[j] == '/' {
+			if !inClass && s[j] == '[' {
+				inClass = true
+				j++
+				// `[]` and `[^]` allow `]` as first char.
+				if j < len(s) && s[j] == ']' {
+					j++
+					continue
+				}
+				if j+1 < len(s) && s[j] == '^' && s[j+1] == ']' {
+					j += 2
+					continue
+				}
+				continue
+			}
+			if inClass && s[j] == ']' {
+				inClass = false
+				j++
+				continue
+			}
+			if !inClass && s[j] == '/' {
 				break
 			}
 			j++
@@ -804,6 +1253,10 @@ func parseAddress(s string, extended bool) (string, address, error) {
 			return s, address{}, errors.New("unterminated regex address")
 		}
 		pat := s[1:j]
+		// Empty `//` means "reuse last regex"; defer compile to runtime.
+		if pat == "" {
+			return s[j+1:], address{kind: addrRegex, re: nil}, nil
+		}
 		re, err := compileSedRE(pat, extended)
 		if err != nil {
 			return s, address{}, err
@@ -821,11 +1274,13 @@ func parseSub(c *command, body string, extended bool) error {
 	}
 	delim := body[0]
 	rest := body[1:]
-	pat, rest, ok := scanSubField(rest, delim)
+	// Pattern field: track bracket classes so the delim inside `[...]` is
+	// literal. Replacement field: brackets carry no special meaning.
+	pat, rest, ok := scanSubField(rest, delim, true)
 	if !ok {
 		return errors.New("unterminated s pattern")
 	}
-	repl, rest, ok := scanSubField(rest, delim)
+	repl, rest, ok := scanSubField(rest, delim, false)
 	if !ok {
 		return errors.New("unterminated s replacement")
 	}
@@ -846,31 +1301,34 @@ func parseSub(c *command, body string, extended bool) error {
 			return fmt.Errorf("unsupported s flag %q", string(f))
 		}
 	}
-	re, err := compileSedRE(pat, extended)
-	if err != nil {
-		return err
-	}
-	if c.subFlags.icase {
-		// Re-compile with case-insensitive flag applied to the
-		// (already translated) pattern.
-		re, err = regexp.Compile("(?i)" + re.String())
+	// An empty pattern means "reuse the most recent regex" — GNU sed.
+	// Leave c.subRE nil so the runner picks up r.lastRE; resolved each
+	// time the command runs.
+	if pat != "" {
+		re, err := compileSedRE(pat, extended)
 		if err != nil {
 			return err
 		}
+		if c.subFlags.icase {
+			re, err = regexp.Compile("(?i)" + re.String())
+			if err != nil {
+				return err
+			}
+		}
+		c.subRE = re
 	}
-	c.subRE = re
 	c.subRepl = repl
 	return nil
 }
 
-func scanSubField(s string, delim byte) (string, string, bool) {
+// scanSubField extracts one delimited field from an s/// or y/// body.
+// When trackClass is true (regex field), `[...]` is treated as a bracket
+// expression so the s-delimiter inside it is literal — that's needed
+// for `s:[[:space:]]*::` and similar. When false (replacement field),
+// `[` and `]` are literal characters with no special meaning.
+func scanSubField(s string, delim byte, trackClass bool) (string, string, bool) {
 	var b strings.Builder
 	i := 0
-	// inClass tracks whether we're inside a `[...]` bracket expression in
-	// the pattern. The delimiter byte is literal inside a bracket
-	// expression, even when it would normally end the field. This
-	// matters for sed scripts like `s:^[[:space:]]*:...:` where `:` is
-	// the s/// delimiter but also part of the POSIX character class.
 	inClass := false
 	for i < len(s) {
 		c := s[i]
@@ -886,7 +1344,7 @@ func scanSubField(s string, delim byte) (string, string, bool) {
 			i += 2
 			continue
 		}
-		if !inClass && c == '[' {
+		if trackClass && !inClass && c == '[' {
 			inClass = true
 			b.WriteByte(c)
 			i++
@@ -903,7 +1361,7 @@ func scanSubField(s string, delim byte) (string, string, bool) {
 			}
 			continue
 		}
-		if inClass && c == ']' {
+		if trackClass && inClass && c == ']' {
 			inClass = false
 			b.WriteByte(c)
 			i++

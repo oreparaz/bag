@@ -199,6 +199,89 @@ func TestYTransliterate(t *testing.T) {
 	}
 }
 
+// TestAutoconfSubsScript covers the big sed pipeline that autoconf-
+// generated `configure` scripts use to turn "NAME!VALUE!DELIM" lines
+// into the awk subs.awk table. Exercises :label / t / b, h / g,
+// multi-line patterns, and the bracket-in-replacement fix.
+func TestAutoconfSubsScript(t *testing.T) {
+	const acDelim = `%!_!# `
+	in := "NAME!val_of_name" + acDelim + "\n"
+	script := `
+h
+s/^/S["/; s/!.*/"]=/
+p
+g
+s/^[^!]*!//
+:repl
+t repl
+s/` + acDelim + `$//
+t delim
+:delim
+s/["\\]/\\&/g; s/^/"/; s/$/"/
+p
+`
+	_, out := runSed(t, []byte(in), "-n", script)
+	want := "S[\"NAME\"]=\n\"val_of_name\"\n"
+	if out != want {
+		t.Errorf("got %q\nwant %q", out, want)
+	}
+}
+
+func TestEmptyRegexReusesLast(t *testing.T) {
+	// `/RE/{h; s///; ... }` — empty `s///` reuses the most recent regex
+	// (GNU sed). autoconf's VPATH munging needs this.
+	_, out := runSed(t, []byte("VPATH = a b\nfoo\n"), "/VPATH/{h;s///;}")
+	if out != " = a b\nfoo\n" {
+		t.Errorf("got %q", out)
+	}
+}
+
+func TestMultipleEScriptsBlock(t *testing.T) {
+	// Multi-arg `-e` must be joined so a `{ ... }` block can span them
+	// (git's Makefile uses this idiom for SCRIPT_PERL).
+	_, out := runSed(t, []byte("a\nb\n"), "-e", "1{", "-e", "s/a/X/", "-e", "}")
+	if out != "X\nb\n" {
+		t.Errorf("got %q", out)
+	}
+}
+
+func TestSedBracketInReplacement(t *testing.T) {
+	// `[` and `]` in the replacement are literal — they must not be
+	// tracked as a regex bracket class. Autoconf: `s/^/S["/`.
+	_, out := runSed(t, []byte("FOO\n"), `s/^/S["/`)
+	if out != "S[\"FOO\n" {
+		t.Errorf("got %q", out)
+	}
+}
+
+func TestRegexAddressWithBraces(t *testing.T) {
+	// `/${var}/p` — braces in an address must not be mistaken for a
+	// `{ ... }` block.
+	_, out := runSed(t, []byte("hello\n${var}\n"), "-n", "/${var}/p")
+	if out != "${var}\n" {
+		t.Errorf("got %q", out)
+	}
+}
+
+func TestAppendCommand(t *testing.T) {
+	// `2a\<NL>text` appends after line 2.
+	_, out := runSed(t, []byte("a\nb\nc\n"), "2a\\\nappended")
+	if out != "a\nb\nappended\nc\n" {
+		t.Errorf("got %q", out)
+	}
+}
+
+func TestBranchAndHoldSpace(t *testing.T) {
+	// :label / t / hold-space — the autoconf @VAR@ replacement loop.
+	_, out := runSed(t, []byte("@FOO@@BAR@\n"), `:t
+/@[a-zA-Z_][a-zA-Z_0-9]*@/!b
+s|@FOO@|valA|;t t
+s|@BAR@|valB|;t t`)
+	if out != "valAvalB\n" {
+		t.Errorf("got %q", out)
+	}
+}
+
 // Regression for the kernel-build asm-offsets script: default sed mode
 // is BRE (\( \) are groups), `s` delimiter survives inside [[:space:]],
 // blocks `/RE/{cmd1;cmd2;...}` work, and -n + s///p only prints when a
