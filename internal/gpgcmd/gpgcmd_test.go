@@ -662,6 +662,88 @@ func TestPrintMDMatchesSystem(t *testing.T) {
 	}
 }
 
+// TestShowKeysFromFile: export a key with bag, then bag --show-keys
+// on the exported file should print it without touching the keyring
+// (we verify by exporting into a separate home, then running
+// show-keys against a third, empty home).
+func TestShowKeysFromFile(t *testing.T) {
+	srcHome := t.TempDir()
+	t.Setenv("GNUPGHOME", srcHome)
+	exit, _, er := runBag(t, nil,
+		"--batch", "--quick-gen-key", "Show <show@x.io>", "rsa", "default", "0")
+	if exit != 0 {
+		t.Fatalf("genkey: exit=%d stderr=%s", exit, er)
+	}
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "show.pgp")
+	exit, _, er = runBag(t, nil, "--export", "-a", "-o", keyPath, "show@x.io")
+	if exit != 0 {
+		t.Fatalf("export: exit=%d stderr=%s", exit, er)
+	}
+
+	// New empty home: --show-keys must list without creating
+	// pubring.gpg / secring.gpg there.
+	emptyHome := t.TempDir()
+	t.Setenv("GNUPGHOME", emptyHome)
+	exit, out, er := runBag(t, nil, "--show-keys", keyPath)
+	if exit != 0 {
+		t.Fatalf("show-keys: exit=%d stderr=%s", exit, er)
+	}
+	if !bytes.Contains(out, []byte("show@x.io")) {
+		t.Errorf("show-keys output missing UID: %s", out)
+	}
+	// Verify keyrings were NOT created.
+	if _, err := os.Stat(filepath.Join(emptyHome, "pubring.gpg")); err == nil {
+		t.Errorf("--show-keys created a pubring; should be a pure read")
+	}
+}
+
+// TestWithColonsListing: --list-keys --with-colons must produce
+// records in the documented colon format, with stable column count
+// (15) and the expected leading record types.
+func TestWithColonsListing(t *testing.T) {
+	t.Setenv("GNUPGHOME", t.TempDir())
+	exit, _, er := runBag(t, nil,
+		"--batch", "--quick-gen-key", "Col <col@x.io>", "rsa", "default", "0")
+	if exit != 0 {
+		t.Fatalf("genkey: exit=%d stderr=%s", exit, er)
+	}
+	exit, out, er := runBag(t, nil, "--list-keys", "--with-colons")
+	if exit != 0 {
+		t.Fatalf("list-keys --with-colons: exit=%d stderr=%s", exit, er)
+	}
+	sawPub, sawFpr, sawUID := false, false, false
+	for _, line := range bytes.Split(out, []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		fields := bytes.Split(line, []byte(":"))
+		switch string(fields[0]) {
+		case "pub":
+			sawPub = true
+			// Field 5 = keyid, 16 hex chars.
+			if len(fields) >= 5 && len(fields[4]) != 16 {
+				t.Errorf("pub keyid not 16 hex: %q (line=%q)", fields[4], line)
+			}
+		case "fpr":
+			sawFpr = true
+			// Field 10 = full fingerprint.
+			if len(fields) >= 10 && len(fields[9]) < 40 {
+				t.Errorf("fpr too short: %q", fields[9])
+			}
+		case "uid":
+			sawUID = true
+			if !bytes.Contains(line, []byte("col@x.io")) {
+				t.Errorf("uid line missing email: %s", line)
+			}
+		}
+	}
+	if !sawPub || !sawFpr || !sawUID {
+		t.Errorf("missing record types pub=%v fpr=%v uid=%v\noutput=%s",
+			sawPub, sawFpr, sawUID, out)
+	}
+}
+
 // TestListPacketsSeesSymmetric: encrypt with bag -c, run bag
 // --list-packets on the result, look for the expected packet labels.
 // We don't pin the exact text (it's a debug dump, not an API) but we

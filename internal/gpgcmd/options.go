@@ -32,6 +32,7 @@ const (
 	actionDearmor
 	actionPrintMD
 	actionListPackets
+	actionShowKeys
 	actionHelp
 	actionVersion
 )
@@ -79,9 +80,10 @@ type options struct {
 	noTTY         bool   // --no-tty
 
 	// Misc.
-	homeDir string // --homedir
-	verbose int    // -v repeated
-	quiet   bool   // -q
+	homeDir    string // --homedir
+	verbose    int    // -v repeated
+	quiet      bool   // -q
+	withColons bool   // --with-colons (machine-readable list)
 }
 
 func parseArgs(argv []string) (*options, error) {
@@ -171,6 +173,10 @@ func parseArgs(argv []string) (*options, error) {
 				o.act = actionPrintMD
 			case "list-packets":
 				o.act = actionListPackets
+			case "show-keys", "show-key":
+				o.act = actionShowKeys
+			case "with-colons":
+				o.withColons = true
 			case "help":
 				o.act = actionHelp
 			case "version":
@@ -362,7 +368,7 @@ func parseArgs(argv []string) (*options, error) {
 
 	// Dispatch positional args based on action.
 	switch o.act {
-	case actionImport:
+	case actionImport, actionShowKeys:
 		o.importFiles = positional
 	case actionExport, actionExportSecret, actionListKeys, actionListSecretKeys,
 		actionDeleteKeys, actionDeleteSecretKeys:

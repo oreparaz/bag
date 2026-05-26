@@ -94,6 +94,8 @@ func runAction(o *options) error {
 		return doPrintMD(o)
 	case actionListPackets:
 		return doListPackets(o)
+	case actionShowKeys:
+		return doShowKeys(o)
 	}
 	return fmt.Errorf("unknown action")
 }

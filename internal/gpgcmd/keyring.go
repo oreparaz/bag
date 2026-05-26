@@ -34,13 +34,19 @@ func doListKeys(o *options, secret bool) error {
 	}
 	defer out.Close()
 
-	fmt.Fprintln(out, headerPath)
-	fmt.Fprintln(out, strings.Repeat("-", len(headerPath)))
+	if !o.withColons {
+		fmt.Fprintln(out, headerPath)
+		fmt.Fprintln(out, strings.Repeat("-", len(headerPath)))
+	}
 	for _, e := range list {
 		if !matchUserID(e, o.exportUser) {
 			continue
 		}
-		printEntity(out, e, secret)
+		if o.withColons {
+			printEntityColons(out, e, secret)
+		} else {
+			printEntity(out, e, secret)
+		}
 	}
 	return nil
 }
