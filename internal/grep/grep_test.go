@@ -95,6 +95,44 @@ func TestFixedStringEscapesRegex(t *testing.T) {
 	}
 }
 
+// TestBREDefault: default mode is POSIX BRE — `*+` at the start of the
+// pattern is literal (GNU grep behaviour). RE2 would normally reject
+// these as "invalid quantifier". This was hit by autoconf-generated
+// configure scripts.
+func TestBREDefault(t *testing.T) {
+	exit, out := runGrep(t, []byte("foo*+bar\nzzz\n"), "*+")
+	if exit != 0 {
+		t.Fatalf("exit=%d", exit)
+	}
+	if out != "foo*+bar\n" {
+		t.Errorf("got %q", out)
+	}
+}
+
+// In BRE mode, `\(...\)` are groups; `(`, `)` are literal.
+func TestBREGroups(t *testing.T) {
+	_, out := runGrep(t, []byte("alpha-beta\nx\n"), `\(alpha\)-\(beta\)`)
+	if out != "alpha-beta\n" {
+		t.Errorf("got %q", out)
+	}
+}
+
+// And `(`/`)` without backslash are literal in BRE.
+func TestBREParenLiteral(t *testing.T) {
+	_, out := runGrep(t, []byte("foo (bar)\nbaz\n"), "(bar)")
+	if out != "foo (bar)\n" {
+		t.Errorf("got %q", out)
+	}
+}
+
+// ERE mode swaps the meaning.
+func TestEREGroups(t *testing.T) {
+	_, out := runGrep(t, []byte("alpha-beta\nx\n"), "-E", "(alpha)-(beta)")
+	if out != "alpha-beta\n" {
+		t.Errorf("got %q", out)
+	}
+}
+
 func TestWordRegexp(t *testing.T) {
 	_, out := runGrep(t, []byte("foobar\nfoo bar\n"), "-w", "foo")
 	if out != "foo bar\n" {

@@ -138,6 +138,12 @@ func buildPattern(o *options) (*regexp.Regexp, error) {
 			esc := line
 			if o.fixed {
 				esc = regexp.QuoteMeta(line)
+			} else if !o.extended {
+				// Default mode is BRE. Translate to RE2 so `\(` `\)` are
+				// groups, `(` `)` are literal, and `*+?` at the start of
+				// a pattern are literal (GNU grep behaviour). This is what
+				// lets autoconf's `grep '*+'` tests not blow up.
+				esc = breToRE2(esc)
 			}
 			if o.wordRegexp {
 				esc = `\b(?:` + esc + `)\b`
@@ -156,6 +162,113 @@ func buildPattern(o *options) (*regexp.Regexp, error) {
 		final = "(?i)" + final
 	}
 	return regexp.Compile(final)
+}
+
+// breToRE2 converts a POSIX Basic Regular Expression into something
+// RE2 accepts. Same rules as sed's BRE translator:
+//   \( \) \| \+ \? \{ \}   group / alt / quantifier metachars
+//   ( ) | + ? { }          literal
+//   * at the start of a pattern (or after `(` or `|`) is literal
+//   \< \>  -> \b
+// The translator is intentionally pragmatic — it handles the patterns
+// autoconf and shell scripts actually use, not every POSIX edge case.
+func breToRE2(pat string) string {
+	var out strings.Builder
+	out.Grow(len(pat))
+	inClass := false
+	// atStart is true when a `*` `+` `?` here would be invalid in
+	// strict POSIX (no preceding atom) — GNU grep treats these as
+	// literal at start-of-pattern and after `(` or `|`.
+	atStart := true
+	for i := 0; i < len(pat); i++ {
+		c := pat[i]
+		if inClass {
+			out.WriteByte(c)
+			if c == ']' {
+				inClass = false
+			}
+			continue
+		}
+		if c == '[' {
+			out.WriteByte(c)
+			inClass = true
+			if i+1 < len(pat) && pat[i+1] == ']' {
+				out.WriteByte(']')
+				i++
+			} else if i+2 < len(pat) && pat[i+1] == '^' && pat[i+2] == ']' {
+				out.WriteByte('^')
+				out.WriteByte(']')
+				i += 2
+			}
+			atStart = false
+			continue
+		}
+		if c == '\\' && i+1 < len(pat) {
+			n := pat[i+1]
+			switch n {
+			case '(', ')', '|':
+				out.WriteByte(n)
+				i++
+				if n == '(' || n == '|' {
+					atStart = true
+				} else {
+					atStart = false
+				}
+				continue
+			case '+', '?', '{', '}':
+				out.WriteByte(n)
+				i++
+				atStart = false
+				continue
+			case '<', '>':
+				out.WriteString(`\b`)
+				i++
+				atStart = false
+				continue
+			default:
+				out.WriteByte(c)
+				out.WriteByte(n)
+				i++
+				atStart = false
+				continue
+			}
+		}
+		switch c {
+		case '(', ')', '|', '+', '?', '{', '}':
+			out.WriteByte('\\')
+			out.WriteByte(c)
+			atStart = false
+		case '*':
+			// `*` at start (or right after `(` or `|`) is literal in
+			// GNU BRE; elsewhere it's a quantifier.
+			if atStart {
+				out.WriteString(`\*`)
+			} else {
+				out.WriteByte('*')
+			}
+			atStart = false
+		case '$':
+			// BRE anchor only at end; literal elsewhere.
+			if i == len(pat)-1 {
+				out.WriteByte('$')
+			} else {
+				out.WriteString(`\$`)
+			}
+			atStart = false
+		case '^':
+			// BRE anchor only at start; literal elsewhere.
+			if i == 0 {
+				out.WriteByte('^')
+			} else {
+				out.WriteString(`\^`)
+			}
+			atStart = false
+		default:
+			out.WriteByte(c)
+			atStart = false
+		}
+	}
+	return out.String()
 }
 
 func processOne(out *bufio.Writer, name string, re *regexp.Regexp, o *options, showFilename bool) (bool, error) {

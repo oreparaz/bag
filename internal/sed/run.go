@@ -330,6 +330,11 @@ type runner struct {
 	// rangeOpen tracks whether each command's addr1..addr2 range is open.
 	rangeOpen []bool
 
+	// wFiles maps the filename arg of each `w FILE` and `s///w FILE` to
+	// an open file (opened on first use, closed at end of script). The
+	// first open truncates; subsequent writes append.
+	wFiles map[string]*os.File
+
 	// per-cycle:
 	lineNo  int
 	isLast  bool
@@ -357,6 +362,7 @@ func (r *runner) readLine() bool {
 // runAll drives the input loop: read a line, execute the program, auto-
 // print, flush any queued `a` text, repeat.
 func (r *runner) runAll() {
+	defer r.closeWFiles()
 	for !r.quit && r.readLine() {
 		r.deleted = false
 		r.appended = r.appended[:0]
@@ -369,6 +375,32 @@ func (r *runner) runAll() {
 			r.out.WriteString(t)
 			r.out.WriteByte('\n')
 		}
+	}
+}
+
+// writeW appends `line + \n` to the file named by path. The file is
+// opened (truncating) on first reference and reused for subsequent
+// writes — matches GNU sed's `w` command semantics.
+func (r *runner) writeW(path, line string) {
+	f, ok := r.wFiles[path]
+	if !ok {
+		var err error
+		f, err = os.Create(path)
+		if err != nil {
+			return // silently dropped, like GNU sed when -W can't open
+		}
+		if r.wFiles == nil {
+			r.wFiles = map[string]*os.File{}
+		}
+		r.wFiles[path] = f
+	}
+	f.WriteString(line)
+	f.Write([]byte{'\n'})
+}
+
+func (r *runner) closeWFiles() {
+	for _, f := range r.wFiles {
+		f.Close()
 	}
 }
 
@@ -484,6 +516,8 @@ func (r *runner) execProgram() {
 				r.appended = append(r.appended, s)
 			}
 			// Missing file is silently ignored, per GNU sed.
+		case 'w':
+			r.writeW(c.label, r.ps)
 		case 'i':
 			r.out.WriteString(c.label)
 			r.out.WriteByte('\n')
@@ -987,6 +1021,14 @@ func parseCommand(s string, extended bool) (command, error) {
 		c.label = strings.TrimSpace(body)
 		if c.label == "" {
 			return c, errors.New("r requires a filename")
+		}
+	case 'w':
+		// Write pattern space to file. Rest of line is the filename
+		// (whitespace stripped). The first w-write to a given file
+		// truncates it; subsequent writes append.
+		c.label = strings.TrimSpace(body)
+		if c.label == "" {
+			return c, errors.New("w requires a filename")
 		}
 	case 'a', 'i', 'c':
 		// Append / insert / change. Both forms accepted:
