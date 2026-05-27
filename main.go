@@ -48,6 +48,7 @@ import (
 	"github.com/oreparaz/bag/internal/vi"
 	"github.com/oreparaz/bag/internal/wc"
 	"github.com/oreparaz/bag/internal/wget"
+	"github.com/oreparaz/bag/internal/xargs"
 	"github.com/oreparaz/bag/internal/xxd"
 	"github.com/oreparaz/bag/internal/zipcmd"
 )
@@ -96,6 +97,7 @@ func tools() []Tool {
 		{Name: "vi", Run: vi.Main, Help: "modal text editor"},
 		{Name: "wc", Run: wc.Main, Help: "count lines/words/bytes"},
 		{Name: "wget", Run: wget.Main, Help: "download files"},
+		{Name: "xargs", Run: xargs.Main, Help: "build and execute command lines from stdin"},
 		{Name: "xxd", Run: xxd.Main, Help: "hex dump / reverse"},
 		{Name: "zip", Run: func(a []string) int { return zipcmd.MainAs("zip", a) }, Help: "create zip archive"},
 		{Name: "unzip", Run: func(a []string) int { return zipcmd.MainAs("unzip", a) }, Help: "extract zip archive"},
