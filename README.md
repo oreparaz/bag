@@ -45,6 +45,12 @@ Why?
 | `ssh`      | usable | client only; pubkey + password auth, known_hosts TOFU      |
 | `scp`      | usable | classic scp protocol, -r recursive, -p preserve, -P port   |
 | `gpg`      | usable | OpenPGP encrypt/decrypt/sign/verify, RSA/Ed25519/ECDSA gen-key, list/import/export, armor, passphrase |
+| `ls`       | usable | -l/-a/-A/-1/-h/-S/-t/-r/-R/-d/-F/-i; one-per-line output   |
+| `cp`       | usable | -r/-R, -p, -i, -f, -n, -v, -L/-P, -a (=-dpR archive)       |
+| `mv`       | usable | -f/-i/-n/-v; cross-FS fallback to copy + remove            |
+| `rm`       | usable | -r/-R, -f, -i, -v, -d; preserves '/' by default            |
+| `mkdir`    | usable | -p parents, -m MODE (octal), -v                            |
+| `chmod`    | usable | octal + symbolic (u+x, a-w, =rx, +X), -R, -v, -c, --reference |
 
 See [FUTURE.md](FUTURE.md) for the wish list.
 
