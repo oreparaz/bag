@@ -23,6 +23,7 @@ import (
 	"github.com/oreparaz/bag/internal/cp"
 	"github.com/oreparaz/bag/internal/curl"
 	"github.com/oreparaz/bag/internal/cut"
+	bagdate "github.com/oreparaz/bag/internal/date"
 	"github.com/oreparaz/bag/internal/find"
 	"github.com/oreparaz/bag/internal/gpgcmd"
 	"github.com/oreparaz/bag/internal/grep"
@@ -35,11 +36,13 @@ import (
 	"github.com/oreparaz/bag/internal/rm"
 	"github.com/oreparaz/bag/internal/scp"
 	"github.com/oreparaz/bag/internal/sed"
+	"github.com/oreparaz/bag/internal/seq"
 	bagsort "github.com/oreparaz/bag/internal/sort"
 	bagssh "github.com/oreparaz/bag/internal/ssh"
 	"github.com/oreparaz/bag/internal/tail"
 	"github.com/oreparaz/bag/internal/tarcmd"
 	"github.com/oreparaz/bag/internal/tee"
+	"github.com/oreparaz/bag/internal/tr"
 	"github.com/oreparaz/bag/internal/uniq"
 	"github.com/oreparaz/bag/internal/vi"
 	"github.com/oreparaz/bag/internal/wc"
@@ -64,6 +67,7 @@ func tools() []Tool {
 		{Name: "cp", Run: cp.Main, Help: "copy files and directories"},
 		{Name: "curl", Run: curl.Main, Help: "transfer URLs"},
 		{Name: "cut", Run: cut.Main, Help: "select fields/bytes"},
+		{Name: "date", Run: bagdate.Main, Help: "show or format date and time"},
 		{Name: "find", Run: find.Main, Help: "walk and filter files"},
 		{Name: "gpg", Run: gpgcmd.Main, Help: "OpenPGP encrypt/decrypt/sign/verify"},
 		{Name: "grep", Run: grep.Main, Help: "search lines (RE2)"},
@@ -76,6 +80,7 @@ func tools() []Tool {
 		{Name: "rm", Run: rm.Main, Help: "remove files and directories"},
 		{Name: "scp", Run: scp.Main, Help: "secure copy (over SSH)"},
 		{Name: "sed", Run: sed.Main, Help: "stream editor (subset)"},
+		{Name: "seq", Run: seq.Main, Help: "print number sequence"},
 		{Name: "sha1sum", Run: func(a []string) int { return hashsum.MainAs("sha1sum", a) }, Help: "compute SHA-1 hashes"},
 		{Name: "sha256sum", Run: func(a []string) int { return hashsum.MainAs("sha256sum", a) }, Help: "compute SHA-256 hashes"},
 		{Name: "sha512sum", Run: func(a []string) int { return hashsum.MainAs("sha512sum", a) }, Help: "compute SHA-512 hashes"},
@@ -84,6 +89,7 @@ func tools() []Tool {
 		{Name: "tail", Run: tail.Main, Help: "last lines/bytes"},
 		{Name: "tar", Run: tarcmd.Main, Help: "tape archiver"},
 		{Name: "tee", Run: tee.Main, Help: "stdin to stdout + files"},
+		{Name: "tr", Run: tr.Main, Help: "translate or delete characters"},
 		{Name: "uniq", Run: uniq.Main, Help: "collapse adjacent dups"},
 		{Name: "vi", Run: vi.Main, Help: "modal text editor"},
 		{Name: "wc", Run: wc.Main, Help: "count lines/words/bytes"},
