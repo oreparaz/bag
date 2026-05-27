@@ -19,6 +19,7 @@ import (
 	"github.com/oreparaz/bag/internal/cat"
 	"github.com/oreparaz/bag/internal/cmpressor"
 	"github.com/oreparaz/bag/internal/compress"
+	"github.com/oreparaz/bag/internal/cp"
 	"github.com/oreparaz/bag/internal/curl"
 	"github.com/oreparaz/bag/internal/cut"
 	"github.com/oreparaz/bag/internal/find"
@@ -56,6 +57,7 @@ func tools() []Tool {
 		{Name: "ag", Run: ag.Main, Help: "recursive code search (RE2)"},
 		{Name: "base64", Run: base64cmd.Main, Help: "encode/decode base64"},
 		{Name: "cat", Run: cat.Main, Help: "concatenate files"},
+		{Name: "cp", Run: cp.Main, Help: "copy files and directories"},
 		{Name: "curl", Run: curl.Main, Help: "transfer URLs"},
 		{Name: "cut", Run: cut.Main, Help: "select fields/bytes"},
 		{Name: "find", Run: find.Main, Help: "walk and filter files"},
