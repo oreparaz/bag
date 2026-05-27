@@ -26,6 +26,7 @@ import (
 	"github.com/oreparaz/bag/internal/cut"
 	bagdate "github.com/oreparaz/bag/internal/date"
 	bagdiff "github.com/oreparaz/bag/internal/diff"
+	"github.com/oreparaz/bag/internal/dig"
 	"github.com/oreparaz/bag/internal/find"
 	"github.com/oreparaz/bag/internal/gpgcmd"
 	"github.com/oreparaz/bag/internal/grep"
@@ -35,6 +36,7 @@ import (
 	"github.com/oreparaz/bag/internal/ls"
 	"github.com/oreparaz/bag/internal/mkdir"
 	"github.com/oreparaz/bag/internal/mv"
+	"github.com/oreparaz/bag/internal/nc"
 	bagpatch "github.com/oreparaz/bag/internal/patch"
 	"github.com/oreparaz/bag/internal/rm"
 	"github.com/oreparaz/bag/internal/scp"
@@ -75,6 +77,7 @@ func tools() []Tool {
 		{Name: "cut", Run: cut.Main, Help: "select fields/bytes"},
 		{Name: "date", Run: bagdate.Main, Help: "show or format date and time"},
 		{Name: "diff", Run: bagdiff.Main, Help: "line-by-line file comparison"},
+		{Name: "dig", Run: dig.Main, Help: "DNS lookup"},
 		{Name: "find", Run: find.Main, Help: "walk and filter files"},
 		{Name: "gpg", Run: gpgcmd.Main, Help: "OpenPGP encrypt/decrypt/sign/verify"},
 		{Name: "grep", Run: grep.Main, Help: "search lines (RE2)"},
@@ -84,6 +87,7 @@ func tools() []Tool {
 		{Name: "md5sum", Run: func(a []string) int { return hashsum.MainAs("md5sum", a) }, Help: "compute MD5 hashes"},
 		{Name: "mkdir", Run: mkdir.Main, Help: "create directories"},
 		{Name: "mv", Run: mv.Main, Help: "move (rename) files"},
+		{Name: "nc", Run: nc.Main, Help: "TCP/UDP swiss army (connect, listen, scan)"},
 		{Name: "patch", Run: bagpatch.Main, Help: "apply unified-diff patches"},
 		{Name: "rm", Run: rm.Main, Help: "remove files and directories"},
 		{Name: "scp", Run: scp.Main, Help: "secure copy (over SSH)"},
