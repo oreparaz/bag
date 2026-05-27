@@ -51,6 +51,20 @@ Why?
 | `rm`       | usable | -r/-R, -f, -i, -v, -d; preserves '/' by default            |
 | `mkdir`    | usable | -p parents, -m MODE (octal), -v                            |
 | `chmod`    | usable | octal + symbolic (u+x, a-w, =rx, +X), -R, -v, -c, --reference |
+| `stat`     | usable | default block + -c FORMAT (full conversion set), -L, -t    |
+| `sha256sum` `sha512sum` `sha1sum` `md5sum` | usable | hash + -c verify + BSD --tag format |
+| `date`     | usable | strftime %a %b %F %T %s %Y …, -u, -R, -I, -d STR, -r FILE  |
+| `seq`      | usable | one/two/three-arg forms, -s, -w, -f                        |
+| `tr`       | usable | ranges, escapes, [:class:], -d, -s, -c, -t                 |
+| `xargs`    | usable | -0, -d, -n, -I{}, -r, -t, -p, -a, -s; exit-code passthrough |
+| `cmp`      | usable | -s, -l, -b, -n, -i; gnu-compatible exit codes               |
+| `diff`     | usable | Myers + unified format; -r, -N, -q, -i, -w, -B, -s         |
+| `patch`    | usable | unified-diff input; -p, -i, -R, -o, --dry-run              |
+| `dig`      | usable | A/AAAA/CNAME/MX/NS/TXT/PTR/SRV; @server, +short, -x        |
+| `nc`       | usable | TCP/UDP connect + -l listen + -z scan; no -e exec          |
+| `ping`     | usable | ICMP echo (CAP_NET_RAW or unprivileged); -c/-W/-i/-s/-4/-6 |
+| `ps`       | usable | Linux /proc walk; default + aux + -ef formats              |
+| `jq`       | usable | full filter language via itchyny/gojq; -r, -c, -s, -n, --arg |
 
 See [FUTURE.md](FUTURE.md) for the wish list.
 

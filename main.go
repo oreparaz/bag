@@ -33,6 +33,7 @@ import (
 	"github.com/oreparaz/bag/internal/head"
 	"github.com/oreparaz/bag/internal/hashsum"
 	"github.com/oreparaz/bag/internal/hexdump"
+	"github.com/oreparaz/bag/internal/jq"
 	"github.com/oreparaz/bag/internal/ls"
 	"github.com/oreparaz/bag/internal/mkdir"
 	"github.com/oreparaz/bag/internal/mv"
@@ -85,6 +86,7 @@ func tools() []Tool {
 		{Name: "grep", Run: grep.Main, Help: "search lines (RE2)"},
 		{Name: "head", Run: head.Main, Help: "first lines/bytes"},
 		{Name: "hexdump", Run: hexdump.Main, Help: "BSD hex dump"},
+		{Name: "jq", Run: jq.Main, Help: "JSON processor"},
 		{Name: "ls", Run: ls.Main, Help: "list directory contents"},
 		{Name: "md5sum", Run: func(a []string) int { return hashsum.MainAs("md5sum", a) }, Help: "compute MD5 hashes"},
 		{Name: "mkdir", Run: mkdir.Main, Help: "create directories"},
