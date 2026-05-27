@@ -29,6 +29,7 @@ import (
 	"github.com/oreparaz/bag/internal/hexdump"
 	"github.com/oreparaz/bag/internal/ls"
 	"github.com/oreparaz/bag/internal/mkdir"
+	"github.com/oreparaz/bag/internal/mv"
 	"github.com/oreparaz/bag/internal/rm"
 	"github.com/oreparaz/bag/internal/scp"
 	"github.com/oreparaz/bag/internal/sed"
@@ -67,6 +68,7 @@ func tools() []Tool {
 		{Name: "hexdump", Run: hexdump.Main, Help: "BSD hex dump"},
 		{Name: "ls", Run: ls.Main, Help: "list directory contents"},
 		{Name: "mkdir", Run: mkdir.Main, Help: "create directories"},
+		{Name: "mv", Run: mv.Main, Help: "move (rename) files"},
 		{Name: "rm", Run: rm.Main, Help: "remove files and directories"},
 		{Name: "scp", Run: scp.Main, Help: "secure copy (over SSH)"},
 		{Name: "sed", Run: sed.Main, Help: "stream editor (subset)"},
