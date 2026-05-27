@@ -39,6 +39,7 @@ import (
 	"github.com/oreparaz/bag/internal/seq"
 	bagsort "github.com/oreparaz/bag/internal/sort"
 	bagssh "github.com/oreparaz/bag/internal/ssh"
+	bagstat "github.com/oreparaz/bag/internal/stat"
 	"github.com/oreparaz/bag/internal/tail"
 	"github.com/oreparaz/bag/internal/tarcmd"
 	"github.com/oreparaz/bag/internal/tee"
@@ -86,6 +87,7 @@ func tools() []Tool {
 		{Name: "sha512sum", Run: func(a []string) int { return hashsum.MainAs("sha512sum", a) }, Help: "compute SHA-512 hashes"},
 		{Name: "sort", Run: bagsort.Main, Help: "sort lines"},
 		{Name: "ssh", Run: bagssh.Main, Help: "minimal SSH client"},
+		{Name: "stat", Run: bagstat.Main, Help: "show file or filesystem status"},
 		{Name: "tail", Run: tail.Main, Help: "last lines/bytes"},
 		{Name: "tar", Run: tarcmd.Main, Help: "tape archiver"},
 		{Name: "tee", Run: tee.Main, Help: "stdin to stdout + files"},
