@@ -79,17 +79,27 @@ func runSession(client *xssh.Client, o *options) error {
 	// don't want them racing on the *Files globals when callers reset
 	// them — e.g. tests using captureStdout, or anything that does
 	// `os.Stdout = …`. Each goroutine has its own snapshot.
+	//
+	// We use SEPARATE channels for the output pumps (stdout/stderr)
+	// and the stdin pump. The output pumps must drain to completion
+	// before runSession returns so callers that wrap os.Stdout in a
+	// pipe (tests using captureStdout, or any caller that wraps the
+	// FD) can see the full byte stream. The stdin pump is allowed to
+	// linger — it may be blocked on a real TTY read that we can't
+	// safely interrupt.
 	in, out, errOut := os.Stdin, os.Stdout, os.Stderr
-	done := make(chan struct{}, 3)
-	go func() { _, _ = io.Copy(stdin, in); _ = stdin.Close(); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(out, stdout); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(errOut, stderr); done <- struct{}{} }()
+	outDone := make(chan struct{}, 2)
+	go func() { _, _ = io.Copy(stdin, in); _ = stdin.Close() }()
+	go func() { _, _ = io.Copy(out, stdout); outDone <- struct{}{} }()
+	go func() { _, _ = io.Copy(errOut, stderr); outDone <- struct{}{} }()
 
 	err = sess.Wait()
-	// Drain stdout/stderr — but stdin may still be blocked on a TTY
-	// read. We don't wait for it.
-	<-done
-	<-done
+	// Drain stdout AND stderr explicitly. Each goroutine signals
+	// only after its io.Copy returns (session pipe closed on remote
+	// exit), so by the time we've taken both signals the bytes are
+	// fully written to our snapshotted out/errOut.
+	<-outDone
+	<-outDone
 
 	if err != nil {
 		var ee *xssh.ExitError

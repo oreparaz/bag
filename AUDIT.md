@@ -153,7 +153,7 @@ Severity scale:
 
 54. **ssh PTY does not propagate SIGWINCH.** `internal/ssh/session.go:108-127`. Resizing the local terminal mid-session leaves the remote PTY size wrong. Fix: `signal.Notify(SIGWINCH)` and call `sess.WindowChange`.
 
-55. **ssh stdin pump goroutine leaks after Wait returns.** `internal/ssh/session.go:75-85`. `done` is buffered for 3 but only 2 reads happen. The third goroutine spins on `os.Stdin`. Fix: send a sentinel to unblock, or set a read deadline.
+55. **[FIXED]** **ssh stdin pump goroutine leaks after Wait returns.** `internal/ssh/session.go:75-85`. `done` was a single 3-buffered channel and `<-done <-done` could consume stdin's + stderr's signal, returning before stdout's pump had finished writing — visible to tests using captureStdout as intermittent empty output. Fix: separate channel for output pumps, drain both before returning; stdin pump may still linger but no longer corrupts the output flow.
 
 56. **ssh terminal raw mode not restored on signal.** `internal/ssh/session.go:46-57`. Same class as vi #30.
 
