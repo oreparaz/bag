@@ -7,7 +7,9 @@ replacements for common Unix tools. The replacements aim to behave
 identically to the originals for the most-used ~80% of features.
 
 Why?
-- **Memory safety.** No `unsafe`, no cgo. Just the Go standard library.
+- **Memory safety.** No `unsafe` in bag's own code; no cgo. Dependencies are
+  a small set of well-known Go libraries (compression codecs, ProtonMail
+  go-crypto for `gpg`).
 - **Single static binary.** `CGO_ENABLED=0`. No shared-library surprises.
 - **Boring.** It's supposed to be transparent. You shouldn't notice.
 
@@ -42,6 +44,7 @@ Why?
 | `hexdump`  | usable | -C / -b / -c / -d / -o / -x; -n -s -v; squeeze with `*`    |
 | `ssh`      | usable | client only; pubkey + password auth, known_hosts TOFU      |
 | `scp`      | usable | classic scp protocol, -r recursive, -p preserve, -P port   |
+| `gpg`      | usable | OpenPGP encrypt/decrypt/sign/verify, RSA/Ed25519/ECDSA gen-key, list/import/export, armor, passphrase |
 
 See [FUTURE.md](FUTURE.md) for the wish list.
 

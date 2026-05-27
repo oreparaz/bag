@@ -121,6 +121,39 @@ target:
 - IDN/punycode hostnames
 - Metalink, parallel transfers (`-Z`)
 
+## gpg features intentionally deferred
+
+The implemented subset covers OpenPGP encrypt/decrypt (symmetric and
+public-key), three signature modes (inline, detached, clearsign),
+verify, key generation (RSA, EdDSA/Curve25519, ECDSA), list/import/
+export/delete, ASCII armor, passphrase handling, and the
+`--enarmor` / `--dearmor` / `--print-md` / `--list-packets` /
+`--show-keys` / `--with-colons` utility commands. Round-trip interop
+with system gpg is enforced by a ~109-subtest matrix in CI.
+
+What we don't do:
+
+- DSA / ElGamal **generation** (the library doesn't implement it).
+  Existing DSA/ElGamal keys can be imported and used for decrypt /
+  verify so that messages from old clients still work.
+- 3DES and CAST5 for **outbound** encryption (the library refuses
+  them per RFC 9580). Decryption of legacy messages using those
+  ciphers still works.
+- Trust database (`trustdb.gpg`) and the web of trust. Bag-generated
+  keys carry no trust records; interop with system gpg uses
+  `--trust-model always`.
+- `--edit-key` sub-commands (add UID, add subkey, expire, revoke).
+  Use system gpg for key maintenance, then `gpg --export` /
+  `bag gpg --import`.
+- `--gen-revoke` (revocation certificates).
+- Keyserver integration (`--send-keys`, `--recv-keys`, `--keyserver`).
+- Smartcard / OpenPGP card / FIDO support.
+- The modern `private-keys-v1.d/` keystore. Bag still writes the
+  legacy `pubring.gpg` / `secring.gpg` files; system gpg 2.x
+  auto-migrates these on first use. On macOS this migration has a
+  known bug for RSA encryption subkeys — bag's matrix tests skip
+  RSA on Darwin to avoid the gpg-side issue.
+
 ## wget features intentionally deferred
 
 - FTP(S), retrieving via FTP login
@@ -135,9 +168,9 @@ target:
 
 ## tail features intentionally deferred
 
-- `-f` / `-F` follow modes (and `--retry`, `--max-unchanged-stats`,
-  `--pid`)
-- `--sleep-interval`, `--max-unchanged-stats` for follow mode
+- `--retry` / `--max-unchanged-stats` / `--pid` flags for follow mode
+  (the base `-f` / `-F` polling loop is implemented at 200 ms,
+  configurable via `--sleep-interval`).
 
 ## cat features intentionally deferred
 
