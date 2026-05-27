@@ -27,6 +27,7 @@ import (
 	"github.com/oreparaz/bag/internal/gpgcmd"
 	"github.com/oreparaz/bag/internal/grep"
 	"github.com/oreparaz/bag/internal/head"
+	"github.com/oreparaz/bag/internal/hashsum"
 	"github.com/oreparaz/bag/internal/hexdump"
 	"github.com/oreparaz/bag/internal/ls"
 	"github.com/oreparaz/bag/internal/mkdir"
@@ -69,11 +70,15 @@ func tools() []Tool {
 		{Name: "head", Run: head.Main, Help: "first lines/bytes"},
 		{Name: "hexdump", Run: hexdump.Main, Help: "BSD hex dump"},
 		{Name: "ls", Run: ls.Main, Help: "list directory contents"},
+		{Name: "md5sum", Run: func(a []string) int { return hashsum.MainAs("md5sum", a) }, Help: "compute MD5 hashes"},
 		{Name: "mkdir", Run: mkdir.Main, Help: "create directories"},
 		{Name: "mv", Run: mv.Main, Help: "move (rename) files"},
 		{Name: "rm", Run: rm.Main, Help: "remove files and directories"},
 		{Name: "scp", Run: scp.Main, Help: "secure copy (over SSH)"},
 		{Name: "sed", Run: sed.Main, Help: "stream editor (subset)"},
+		{Name: "sha1sum", Run: func(a []string) int { return hashsum.MainAs("sha1sum", a) }, Help: "compute SHA-1 hashes"},
+		{Name: "sha256sum", Run: func(a []string) int { return hashsum.MainAs("sha256sum", a) }, Help: "compute SHA-256 hashes"},
+		{Name: "sha512sum", Run: func(a []string) int { return hashsum.MainAs("sha512sum", a) }, Help: "compute SHA-512 hashes"},
 		{Name: "sort", Run: bagsort.Main, Help: "sort lines"},
 		{Name: "ssh", Run: bagssh.Main, Help: "minimal SSH client"},
 		{Name: "tail", Run: tail.Main, Help: "last lines/bytes"},
