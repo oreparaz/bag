@@ -38,6 +38,7 @@ import (
 	"github.com/oreparaz/bag/internal/mv"
 	"github.com/oreparaz/bag/internal/nc"
 	bagpatch "github.com/oreparaz/bag/internal/patch"
+	"github.com/oreparaz/bag/internal/ping"
 	"github.com/oreparaz/bag/internal/rm"
 	"github.com/oreparaz/bag/internal/scp"
 	"github.com/oreparaz/bag/internal/sed"
@@ -89,6 +90,7 @@ func tools() []Tool {
 		{Name: "mv", Run: mv.Main, Help: "move (rename) files"},
 		{Name: "nc", Run: nc.Main, Help: "TCP/UDP swiss army (connect, listen, scan)"},
 		{Name: "patch", Run: bagpatch.Main, Help: "apply unified-diff patches"},
+		{Name: "ping", Run: ping.Main, Help: "send ICMP echo (needs CAP_NET_RAW or unprivileged ICMP)"},
 		{Name: "rm", Run: rm.Main, Help: "remove files and directories"},
 		{Name: "scp", Run: scp.Main, Help: "secure copy (over SSH)"},
 		{Name: "sed", Run: sed.Main, Help: "stream editor (subset)"},
